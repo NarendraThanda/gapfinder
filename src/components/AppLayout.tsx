@@ -21,7 +21,7 @@ export default function AppLayout({
       <Sidebar />
 
       {/* Main Content Area */}
-      <main className="app-main-content">
+      <main className="flex-1 min-w-0 min-h-screen flex flex-col p-4 md:p-8 pt-18 md:pt-8 w-full overflow-x-hidden">
         {/* Top Header if provided */}
         {(headerTitle || actionButton) && (
           <header className="glass p-5 md:p-6 mb-6 md:mb-8 flex flex-col lg:flex-row lg:items-center justify-between gap-4 animate-fadeIn">
