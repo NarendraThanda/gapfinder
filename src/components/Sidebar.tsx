@@ -46,9 +46,14 @@ export default function Sidebar() {
   }, [])
 
   const handleLogout = async () => {
-    const supabase = createClient()
-    await supabase.auth.signOut()
-    router.push('/auth/login')
+    try {
+      const supabase = createClient()
+      await supabase.auth.signOut()
+      await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {})
+    } finally {
+      router.push('/auth/login')
+      router.refresh()
+    }
   }
 
   return (
