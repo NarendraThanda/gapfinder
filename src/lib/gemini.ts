@@ -73,11 +73,12 @@ export function isCleanOptionText(str: string): boolean {
   // Reject high-entropy symbol soup (> 8% suspicious symbols)
   if (symbols / t.length > 0.08) return false
 
-  // Check word fragmentation: reject text where > 30% of words are isolated single letters (font byte IDs)
+  // Check word fragmentation: reject text where > 30% of alphabetic words are isolated single letters (font byte IDs)
   const words = t.split(/\s+/).filter(Boolean)
-  if (words.length >= 4) {
-    const singleLetterWords = words.filter(w => w.length === 1 && !['a', 'i', 'A', 'I', '&'].includes(w))
-    if (singleLetterWords.length / words.length > 0.30) return false
+  const alphaWords = words.filter(w => /[a-zA-Z]/.test(w))
+  if (alphaWords.length >= 4) {
+    const singleLetterWords = alphaWords.filter(w => /^[a-zA-Z]$/.test(w) && !['a', 'i', 'A', 'I'].includes(w))
+    if (singleLetterWords.length / alphaWords.length > 0.30) return false
   }
 
   return true
@@ -86,8 +87,8 @@ export function isCleanOptionText(str: string): boolean {
 export function cleanOptionText(opt: any): string {
   if (typeof opt !== 'string') return String(opt || '')
   let cleaned = opt.trim()
-  // Strip leading numbering or letter indicators like "A)", "B.", "1.", "(C)", "D - "
-  cleaned = cleaned.replace(/^(\([A-Da-d\d]\)|[A-Da-d\d][\.\)\:\-]|[A-Da-d]\s+)\s*/, '').trim()
+  // Strip leading numbering or letter indicators like "A)", "B.", "1.", "(C)", "D - ", "D. "
+  cleaned = cleaned.replace(/^(\([A-Da-d\d]\)|[A-Da-d\d]\s*[\.\)\:\-]\s*|[A-Da-d]\s+)\s*/, '').trim()
   // Strip surrounding quotes
   cleaned = cleaned.replace(/^["'`]|["'`]$/g, '').trim()
   return cleaned

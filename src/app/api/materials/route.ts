@@ -43,11 +43,12 @@ export function isNaturalLanguageText(str: string): boolean {
   // No more than 8% high-entropy symbol soup
   if (symbolCount / trimmed.length > 0.08) return false
 
-  // Check word fragmentation: reject text where > 30% of words are isolated single characters (like font byte IDs)
+  // Check word fragmentation: reject text where > 30% of alphabetic words are isolated single characters (like font byte IDs)
   const words = trimmed.split(/\s+/).filter(Boolean)
-  if (words.length >= 6) {
-    const singleLetterWords = words.filter(w => w.length === 1 && !['a', 'i', 'A', 'I', '&'].includes(w))
-    if (singleLetterWords.length / words.length > 0.30) return false
+  const alphaWords = words.filter(w => /[a-zA-Z]/.test(w))
+  if (alphaWords.length >= 6) {
+    const singleLetterWords = alphaWords.filter(w => /^[a-zA-Z]$/.test(w) && !['a', 'i', 'A', 'I'].includes(w))
+    if (singleLetterWords.length / alphaWords.length > 0.30) return false
   }
 
   return true

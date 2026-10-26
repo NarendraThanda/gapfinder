@@ -48,7 +48,7 @@ function formatOptionDisplay(opt: any): string {
   if (typeof opt !== 'string') return String(opt || '')
   let cleaned = opt.trim()
   // Strip leading letter or number prefixes like "A)", "B.", "(C)", "D - ", "1. ", etc.
-  cleaned = cleaned.replace(/^(\([A-Da-d\d]\)|[A-Da-d\d][\.\)\:\-]|[A-Da-d]\s+)\s*/, '').trim()
+  cleaned = cleaned.replace(/^(\([A-Da-d\d]\)|[A-Da-d\d]\s*[\.\)\:\-]\s*|[A-Da-d]\s+)\s*/, '').trim()
   // Strip surrounding quotes
   cleaned = cleaned.replace(/^["'`]|["'`]$/g, '').trim()
   if (cleaned.length === 0) {
