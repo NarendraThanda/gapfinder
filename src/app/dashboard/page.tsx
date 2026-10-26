@@ -15,7 +15,9 @@ import {
   LuRefreshCw,
   LuFileText,
   LuAward,
+  LuPlus,
 } from 'react-icons/lu'
+import MaterialContextSelector, { MaterialOption } from '@/components/MaterialContextSelector'
 
 interface DashboardStats {
   totalQuizzes: number
@@ -36,25 +38,43 @@ interface TopicItem {
   score: number
 }
 
-import MaterialContextSelector, { MaterialOption } from '@/components/MaterialContextSelector'
+interface UserProfile {
+  id: string
+  email?: string
+  full_name?: string
+  avatar_url?: string | null
+}
+
+interface GapReportSummary {
+  id: string
+  topic_name: string
+  strength: 'weak' | 'medium' | 'strong'
+  score: number
+  reason: string
+}
 
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [topics, setTopics] = useState<TopicItem[]>([])
   const [materials, setMaterials] = useState<MaterialOption[]>([])
+  const [profile, setProfile] = useState<UserProfile | null>(null)
+  const [recentReports, setRecentReports] = useState<GapReportSummary[]>([])
   const [activeMaterialId, setActiveMaterialId] = useState<string | null>(null)
   const [activeMaterialTitle, setActiveMaterialTitle] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [seeding, setSeeding] = useState(false)
   const [seedSuccess, setSeedSuccess] = useState('')
 
   const fetchDashboardData = async (targetId?: string | null) => {
     try {
       setLoading(true)
+      setError(null)
       const storedId = typeof window !== 'undefined' ? localStorage.getItem('gapfinder_active_material_id') : null
       const effectiveId = targetId !== undefined ? targetId : (activeMaterialId || storedId)
       const query = effectiveId ? `?materialId=${encodeURIComponent(effectiveId)}` : ''
       const res = await fetch(`/api/progress${query}`)
+
       if (res.ok) {
         const data = await res.json()
         setStats(data.stats)
@@ -62,18 +82,32 @@ export default function DashboardPage() {
         if (data.materials) {
           setMaterials(data.materials)
         }
+        if (data.profile) {
+          setProfile(data.profile)
+        }
+        if (data.recentGapReports) {
+          setRecentReports(data.recentGapReports)
+        }
         if (data.activeMaterialId !== undefined) {
           setActiveMaterialId(data.activeMaterialId)
           if (data.activeMaterialId && typeof window !== 'undefined') {
-            localStorage.setItem('gapfinder_active_material_id', data.activeMaterialId)
+            if (data.activeMaterialId === 'all') {
+              localStorage.removeItem('gapfinder_active_material_id')
+            } else {
+              localStorage.setItem('gapfinder_active_material_id', data.activeMaterialId)
+            }
           }
         }
         if (data.activeMaterialTitle) {
           setActiveMaterialTitle(data.activeMaterialTitle)
         }
+      } else {
+        const errData = await res.json().catch(() => ({}))
+        setError(errData.error || 'Failed to load progress data. Please try again.')
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error fetching dashboard:', err)
+      setError(err?.message || 'Network error fetching dashboard data.')
     } finally {
       setLoading(false)
     }
@@ -86,7 +120,6 @@ export default function DashboardPage() {
   }, [])
 
   const handleMaterialChange = (matId: string) => {
-    // Clear previous material's state immediately to prevent stale topic display
     setTopics([])
     setStats(null)
     setActiveMaterialId(matId)
@@ -141,6 +174,8 @@ export default function DashboardPage() {
       headerSubtitle={
         activeMaterialTitle
           ? `Analysis for: ${activeMaterialTitle}`
+          : profile?.full_name
+          ? `Welcome back, ${profile.full_name} — here is your real-time knowledge gap analysis`
           : 'Real-time analysis of your knowledge gaps grounded in your materials'
       }
       actionButton={
@@ -185,6 +220,29 @@ export default function DashboardPage() {
           </div>
         )}
 
+        {/* Error Notification with Retry */}
+        {error && (
+          <div
+            className="p-4 rounded-xl flex items-center justify-between animate-fadeIn text-sm"
+            style={{
+              background: 'rgba(239, 68, 68, 0.1)',
+              border: '1px solid rgba(239, 68, 68, 0.3)',
+              color: 'var(--accent-danger)',
+            }}
+          >
+            <div className="flex items-center gap-2">
+              <LuTriangleAlert size={18} />
+              <span>{error}</span>
+            </div>
+            <button
+              onClick={() => fetchDashboardData()}
+              className="px-3 py-1 rounded-lg bg-red-500/20 text-white font-medium text-xs hover:bg-red-500/30 transition-colors"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
         {/* Hero Diagnosis Callout */}
         <div className="glass p-8 relative overflow-hidden group">
           <div
@@ -223,6 +281,35 @@ export default function DashboardPage() {
           </div>
         </div>
 
+        {/* Empty State when User has no study materials uploaded yet */}
+        {!loading && materials.length === 0 && (
+          <div className="glass p-12 text-center space-y-6">
+            <div className="w-16 h-16 rounded-2xl bg-purple-500/10 text-purple-400 mx-auto flex items-center justify-center">
+              <LuUpload size={32} />
+            </div>
+            <div className="space-y-2 max-w-md mx-auto">
+              <h3 className="text-xl font-bold text-white">No Study Materials Uploaded Yet</h3>
+              <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                To start discovering your knowledge gaps, upload a syllabus, lecture notes, or PDF textbook. Or explore with one click using Judge Mode.
+              </p>
+            </div>
+            <div className="flex flex-wrap justify-center gap-4">
+              <Link href="/materials" className="btn-primary flex items-center gap-2 text-sm py-2.5 px-5">
+                <LuPlus size={16} />
+                <span>Upload First Material</span>
+              </Link>
+              <button
+                onClick={handleSeedDemo}
+                disabled={seeding}
+                className="btn-secondary flex items-center gap-2 text-sm py-2.5 px-5"
+              >
+                <LuSparkles size={16} className={seeding ? 'animate-spin' : 'text-purple-400'} />
+                <span>Preload Demo Course</span>
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Empty Assessment Callout for Fresh Material */}
         {activeMaterialTitle && stats?.completedQuizzes === 0 && topics.length > 0 && (
           <div
@@ -252,84 +339,96 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* Stat Cards Grid */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 md:gap-6">
-          <div className="glass p-4 sm:p-5 flex flex-col justify-between">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[11px] sm:text-xs uppercase tracking-wider font-semibold text-red-400 truncate">
-                Weak Topics
-              </span>
-              <span className="p-1.5 sm:p-2 rounded-lg bg-red-500/10 text-red-400 shrink-0">
-                <LuTriangleAlert size={16} />
-              </span>
-            </div>
-            <div className="mt-3 sm:mt-4">
-              <span className="text-2xl sm:text-3xl font-extrabold text-red-400">
-                {stats?.weakTopics ?? 0}
-              </span>
-              <p className="text-[11px] sm:text-xs mt-1 truncate" style={{ color: 'var(--text-muted)' }}>
-                Requires urgent revision
-              </p>
-            </div>
+        {/* Stat Cards Grid (with loading skeleton) */}
+        {loading && !stats ? (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 md:gap-6">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="glass p-5 animate-pulse space-y-3">
+                <div className="h-4 bg-white/10 rounded w-1/2" />
+                <div className="h-8 bg-white/10 rounded w-3/4" />
+                <div className="h-3 bg-white/5 rounded w-full" />
+              </div>
+            ))}
           </div>
+        ) : (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 md:gap-6">
+            <div className="glass p-4 sm:p-5 flex flex-col justify-between">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] sm:text-xs uppercase tracking-wider font-semibold text-red-400 truncate">
+                  Weak Topics
+                </span>
+                <span className="p-1.5 sm:p-2 rounded-lg bg-red-500/10 text-red-400 shrink-0">
+                  <LuTriangleAlert size={16} />
+                </span>
+              </div>
+              <div className="mt-3 sm:mt-4">
+                <span className="text-2xl sm:text-3xl font-extrabold text-red-400">
+                  {stats?.weakTopics ?? 0}
+                </span>
+                <p className="text-[11px] sm:text-xs mt-1 truncate" style={{ color: 'var(--text-muted)' }}>
+                  Requires urgent revision
+                </p>
+              </div>
+            </div>
 
-          <div className="glass p-4 sm:p-5 flex flex-col justify-between">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[11px] sm:text-xs uppercase tracking-wider font-semibold text-amber-400 truncate">
-                Medium Topics
-              </span>
-              <span className="p-1.5 sm:p-2 rounded-lg bg-amber-500/10 text-amber-400 shrink-0">
-                <LuRefreshCw size={16} />
-              </span>
+            <div className="glass p-4 sm:p-5 flex flex-col justify-between">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] sm:text-xs uppercase tracking-wider font-semibold text-amber-400 truncate">
+                  Medium Topics
+                </span>
+                <span className="p-1.5 sm:p-2 rounded-lg bg-amber-500/10 text-amber-400 shrink-0">
+                  <LuRefreshCw size={16} />
+                </span>
+              </div>
+              <div className="mt-3 sm:mt-4">
+                <span className="text-2xl sm:text-3xl font-extrabold text-amber-400">
+                  {stats?.mediumTopics ?? 0}
+                </span>
+                <p className="text-[11px] sm:text-xs mt-1 truncate" style={{ color: 'var(--text-muted)' }}>
+                  Partial conceptual grasp
+                </p>
+              </div>
             </div>
-            <div className="mt-3 sm:mt-4">
-              <span className="text-2xl sm:text-3xl font-extrabold text-amber-400">
-                {stats?.mediumTopics ?? 0}
-              </span>
-              <p className="text-[11px] sm:text-xs mt-1 truncate" style={{ color: 'var(--text-muted)' }}>
-                Partial conceptual grasp
-              </p>
-            </div>
-          </div>
 
-          <div className="glass p-4 sm:p-5 flex flex-col justify-between">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[11px] sm:text-xs uppercase tracking-wider font-semibold text-emerald-400 truncate">
-                Mastered Topics
-              </span>
-              <span className="p-1.5 sm:p-2 rounded-lg bg-emerald-500/10 text-emerald-400 shrink-0">
-                <LuCircleCheck size={16} />
-              </span>
+            <div className="glass p-4 sm:p-5 flex flex-col justify-between">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] sm:text-xs uppercase tracking-wider font-semibold text-emerald-400 truncate">
+                  Mastered Topics
+                </span>
+                <span className="p-1.5 sm:p-2 rounded-lg bg-emerald-500/10 text-emerald-400 shrink-0">
+                  <LuCircleCheck size={16} />
+                </span>
+              </div>
+              <div className="mt-3 sm:mt-4">
+                <span className="text-2xl sm:text-3xl font-extrabold text-emerald-400">
+                  {stats?.strongTopics ?? 0}
+                </span>
+                <p className="text-[11px] sm:text-xs mt-1 truncate" style={{ color: 'var(--text-muted)' }}>
+                  Solid foundation (&gt;70%)
+                </p>
+              </div>
             </div>
-            <div className="mt-3 sm:mt-4">
-              <span className="text-2xl sm:text-3xl font-extrabold text-emerald-400">
-                {stats?.strongTopics ?? 0}
-              </span>
-              <p className="text-[11px] sm:text-xs mt-1 truncate" style={{ color: 'var(--text-muted)' }}>
-                Solid foundation (&gt;70%)
-              </p>
-            </div>
-          </div>
 
-          <div className="glass p-4 sm:p-5 flex flex-col justify-between">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[11px] sm:text-xs uppercase tracking-wider font-semibold text-cyan-400 truncate">
-                Overall Accuracy
-              </span>
-              <span className="p-1.5 sm:p-2 rounded-lg bg-cyan-500/10 text-cyan-400 shrink-0">
-                <LuAward size={16} />
-              </span>
-            </div>
-            <div className="mt-3 sm:mt-4">
-              <span className="text-2xl sm:text-3xl font-extrabold text-cyan-400">
-                {stats?.overallAccuracy ?? 0}%
-              </span>
-              <p className="text-[11px] sm:text-xs mt-1 truncate" style={{ color: 'var(--text-muted)' }}>
-                Across {stats?.completedQuizzes ?? 0} quiz assessments
-              </p>
+            <div className="glass p-4 sm:p-5 flex flex-col justify-between">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] sm:text-xs uppercase tracking-wider font-semibold text-cyan-400 truncate">
+                  Overall Accuracy
+                </span>
+                <span className="p-1.5 sm:p-2 rounded-lg bg-cyan-500/10 text-cyan-400 shrink-0">
+                  <LuAward size={16} />
+                </span>
+              </div>
+              <div className="mt-3 sm:mt-4">
+                <span className="text-2xl sm:text-3xl font-extrabold text-cyan-400">
+                  {stats?.overallAccuracy ?? 0}%
+                </span>
+                <p className="text-[11px] sm:text-xs mt-1 truncate" style={{ color: 'var(--text-muted)' }}>
+                  Across {stats?.completedQuizzes ?? 0} quiz assessments
+                </p>
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
         {/* Urgent Action Section: Knowledge Gap Diagnosis */}
         {weakList.length > 0 && (
@@ -351,9 +450,17 @@ export default function DashboardPage() {
                   </p>
                 </div>
               </div>
-              <Link href="/gap-report" className="btn-primary text-sm py-2 px-4" id="view-gap-btn">
-                Inspect Gap Report
-              </Link>
+              <div className="flex items-center gap-3">
+                <Link
+                  href={`/assistant?query=${encodeURIComponent(weakList[0].name)}`}
+                  className="btn-secondary text-sm py-2 px-4"
+                >
+                  Ask AI Tutor
+                </Link>
+                <Link href="/gap-report" className="btn-primary text-sm py-2 px-4" id="view-gap-btn">
+                  Inspect Gap Report
+                </Link>
+              </div>
             </div>
           </div>
         )}
@@ -423,7 +530,16 @@ export default function DashboardPage() {
             </Link>
           </div>
 
-          {topics.length === 0 ? (
+          {loading && topics.length === 0 ? (
+            <div className="space-y-3">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="p-4 rounded-xl glass animate-pulse flex justify-between items-center">
+                  <div className="h-4 bg-white/10 rounded w-1/3" />
+                  <div className="h-6 bg-white/10 rounded w-20" />
+                </div>
+              ))}
+            </div>
+          ) : topics.length === 0 ? (
             <div className="text-center py-10 space-y-3">
               <LuFileText className="mx-auto text-gray-500" size={36} />
               <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
@@ -444,7 +560,7 @@ export default function DashboardPage() {
                     </div>
                   </div>
 
-                  <div>
+                  <div className="flex items-center gap-3">
                     {t.strength === 'weak' && (
                       <span className="badge badge-weak">Weak Gap</span>
                     )}
@@ -454,11 +570,17 @@ export default function DashboardPage() {
                     {t.strength === 'strong' && (
                       <span className="badge badge-strong">Mastered</span>
                     )}
-                    {t.strength === 'untested' && (
+                    {(!t.strength || t.strength === 'untested') && (
                       <span className="badge bg-slate-500/10 text-slate-400 border border-slate-500/30">
                         Untested
                       </span>
                     )}
+                    <Link
+                      href={`/assistant?query=${encodeURIComponent(t.name)}`}
+                      className="text-xs text-cyan-400 hover:underline hidden sm:inline-block"
+                    >
+                      Explain &rarr;
+                    </Link>
                   </div>
                 </div>
               ))}

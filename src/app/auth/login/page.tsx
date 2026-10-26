@@ -7,6 +7,16 @@ import { createClient } from '@/lib/supabase/client'
 import { LuSparkles, LuMail, LuLock, LuEye, LuEyeOff, LuLoader, LuCircleCheck, LuTriangleAlert } from 'react-icons/lu'
 import { FcGoogle } from 'react-icons/fc'
 
+function getCanonicalAuthOrigin(): string {
+  if (typeof window !== 'undefined') {
+    const origin = window.location.origin
+    if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
+      return origin
+    }
+  }
+  return process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, '') || 'https://gapfinder-kappa.vercel.app'
+}
+
 function LoginForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -81,8 +91,13 @@ function LoginForm() {
       }
 
       if (data?.session) {
-        router.push('/dashboard')
-        router.refresh()
+        const canonical = getCanonicalAuthOrigin()
+        if (typeof window !== 'undefined' && !window.location.origin.includes('localhost') && window.location.origin !== canonical) {
+          window.location.href = `${canonical}/dashboard`
+        } else {
+          router.push('/dashboard')
+          router.refresh()
+        }
       } else {
         setError('Session could not be established. Please try signing in again.')
       }
@@ -103,7 +118,7 @@ function LoginForm() {
       const { error: authError } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: `${window.location.origin}/auth/callback?next=/dashboard`,
+          redirectTo: `${getCanonicalAuthOrigin()}/auth/callback?next=/dashboard`,
         },
       })
 
@@ -137,8 +152,13 @@ function LoginForm() {
       }
 
       if (data?.session) {
-        router.push('/dashboard')
-        router.refresh()
+        const canonical = getCanonicalAuthOrigin()
+        if (typeof window !== 'undefined' && !window.location.origin.includes('localhost') && window.location.origin !== canonical) {
+          window.location.href = `${canonical}/dashboard`
+        } else {
+          router.push('/dashboard')
+          router.refresh()
+        }
       } else {
         setError('Demo session could not be initialized.')
       }

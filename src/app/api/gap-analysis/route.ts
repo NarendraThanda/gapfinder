@@ -11,7 +11,30 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { quizId } = await request.json()
+    const body = await request.json().catch(() => ({}))
+    let quizId = body.quizId
+    const materialId = body.materialId
+
+    // If quizId not provided directly, find the latest completed quiz for this material
+    if (!quizId && materialId && materialId !== 'all') {
+      const { data: latestQuiz } = await supabase
+        .from('quizzes')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('material_id', materialId)
+        .eq('status', 'completed')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      if (latestQuiz) {
+        quizId = latestQuiz.id
+      }
+    }
+
+    if (!quizId) {
+      return NextResponse.json({ error: 'Quiz ID or material with completed quiz required' }, { status: 400 })
+    }
 
     // Fetch quiz data with material_id
     const { data: quiz } = await supabase
@@ -37,8 +60,8 @@ export async function POST(request: Request) {
       .eq('quiz_id', quizId)
       .eq('user_id', user.id)
 
-    if (!questions || !answers) {
-      return NextResponse.json({ error: 'No data found' }, { status: 404 })
+    if (!questions || questions.length === 0) {
+      return NextResponse.json({ error: 'No questions found for this quiz' }, { status: 404 })
     }
 
     // Group results by topic
@@ -46,21 +69,18 @@ export async function POST(request: Request) {
     const topicMaterialMap: Record<string, string | null> = {}
 
     for (const question of questions) {
-      const answer = answers.find(a => a.question_id === question.id)
+      const answer = (answers || []).find(a => a.question_id === question.id)
       const topicId = question.topic_id || 'unknown'
 
-      // Get topic name and material_id
-      let topicName = 'General'
+      let topicName = 'General Concepts'
       if (question.topic_id) {
         const { data: topic } = await supabase
           .from('topics')
           .select('name, material_id')
           .eq('id', question.topic_id)
-          .single()
-        topicName = topic?.name || 'General'
-        if (topic?.material_id) {
-          topicMaterialMap[topicId] = topic.material_id
-        }
+          .maybeSingle()
+        if (topic?.name) topicName = topic.name
+        if (topic?.material_id) topicMaterialMap[topicId] = topic.material_id
       }
 
       if (!topicResults[topicId]) {
@@ -72,60 +92,97 @@ export async function POST(request: Request) {
         topicResults[topicId].correct++
       }
       topicResults[topicId].questions.push(
-        `Q: ${question.question} | ${answer?.is_correct ? 'Correct' : 'Wrong'} | ${question.explanation}`
+        `Q: ${question.question} | ${answer?.is_correct ? 'Correct' : 'Incorrect'} | ${question.explanation || ''}`
       )
     }
 
     // Run AI gap analysis
-    const gapResults = await analyzeGaps(Object.values(topicResults))
+    let gapResults: any[] = []
+    try {
+      gapResults = await analyzeGaps(Object.values(topicResults))
+    } catch (aiErr) {
+      console.warn('AI analyzeGaps call encountered error, using empirical fallbacks:', aiErr)
+    }
 
-    // Save gap reports and update topic strengths
+    // Guarantee that every tested topic gets a gap report and updated strength
     const savedReports = []
-    for (const gap of gapResults) {
-      const topicId = Object.keys(topicResults).find(
-        id => topicResults[id].topic_name === gap.topic_name
+    const resolvedMaterialId = quiz.material_id || materialId || null
+
+    for (const [topicId, tData] of Object.entries(topicResults)) {
+      if (topicId === 'unknown') continue
+
+      // Match AI analysis by exact name, normalized lowercase, or inclusion
+      const matchedGap = (gapResults || []).find(
+        g => g.topic_name?.toLowerCase() === tData.topic_name.toLowerCase() ||
+             g.topic_name?.toLowerCase().includes(tData.topic_name.toLowerCase()) ||
+             tData.topic_name.toLowerCase().includes(g.topic_name?.toLowerCase())
       )
 
-      if (topicId && topicId !== 'unknown') {
-        const resolvedMaterialId = quiz.material_id || topicMaterialMap[topicId] || null
+      const empiricalScore = tData.total > 0 ? Math.round((tData.correct / tData.total) * 100) : 0
+      const score = typeof matchedGap?.score === 'number' ? Math.max(0, Math.min(100, matchedGap.score)) : empiricalScore
+      const strength: 'weak' | 'medium' | 'strong' =
+        matchedGap?.strength === 'weak' || matchedGap?.strength === 'medium' || matchedGap?.strength === 'strong'
+          ? matchedGap.strength
+          : score < 40 ? 'weak' : score < 70 ? 'medium' : 'strong'
 
-        // Save gap report linked directly to material
-        const { data: report } = await supabase
-          .from('gap_reports')
-          .insert({
-            user_id: user.id,
-            quiz_id: quizId,
-            topic_id: topicId,
-            material_id: resolvedMaterialId,
-            topic_name: gap.topic_name,
-            strength: gap.strength,
-            score: gap.score,
-            total_questions: topicResults[topicId].total,
-            correct_answers: topicResults[topicId].correct,
-            reason: gap.reason,
-            suggestions: gap.suggestions,
-          })
-          .select()
-          .single()
+      const reason = matchedGap?.reason || (
+        strength === 'weak'
+          ? `Diagnostic quiz performance revealed conceptual gaps in ${tData.topic_name} (${tData.correct}/${tData.total} questions correct, ${score}%). Review foundational principles.`
+          : strength === 'medium'
+          ? `Demonstrated partial conceptual understanding in ${tData.topic_name} (${tData.correct}/${tData.total} questions correct, ${score}%). Practice recommended.`
+          : `Demonstrated strong conceptual grasp of ${tData.topic_name} with ${tData.correct}/${tData.total} questions correct (${score}%).`
+      )
 
-        if (report) savedReports.push(report)
+      const suggestions = (Array.isArray(matchedGap?.suggestions) && matchedGap.suggestions.length > 0)
+        ? matchedGap.suggestions
+        : [
+            `Review lecture notes and definitions for ${tData.topic_name}.`,
+            `Solve targeted practice questions focusing on ${tData.topic_name} edge cases.`,
+          ]
 
-        // Update topic strength
-        await supabase
-          .from('topics')
-          .update({ strength: gap.strength, score: gap.score })
-          .eq('id', topicId)
+      const finalMaterialId = resolvedMaterialId || topicMaterialMap[topicId] || null
 
-        // Save progress history
-        await supabase.from('progress_history').insert({
+      // Upsert/Insert gap report
+      const { data: report, error: reportErr } = await supabase
+        .from('gap_reports')
+        .insert({
           user_id: user.id,
-          topic_id: topicId,
-          topic_name: gap.topic_name,
-          score: gap.score,
-          strength: gap.strength,
           quiz_id: quizId,
+          topic_id: topicId,
+          material_id: finalMaterialId,
+          topic_name: tData.topic_name,
+          strength,
+          score,
+          total_questions: tData.total,
+          correct_answers: tData.correct,
+          reason,
+          suggestions,
         })
+        .select()
+        .single()
+
+      if (report) {
+        savedReports.push(report)
+      } else if (reportErr) {
+        console.error('Error saving gap report for topic', topicId, reportErr)
       }
+
+      // Update topic strength and score in topics table
+      await supabase
+        .from('topics')
+        .update({ strength, score })
+        .eq('id', topicId)
+        .eq('user_id', user.id)
+
+      // Save progress history record
+      await supabase.from('progress_history').insert({
+        user_id: user.id,
+        topic_id: topicId,
+        topic_name: tData.topic_name,
+        score,
+        strength,
+        quiz_id: quizId,
+      })
     }
 
     return NextResponse.json({ reports: savedReports })
@@ -148,6 +205,13 @@ export async function GET(request: Request) {
     const quizId = searchParams.get('quizId')
     let materialId = searchParams.get('materialId')
 
+    // Fetch user materials to validate and find active title
+    const { data: materials } = await supabase
+      .from('materials')
+      .select('id, title, created_at')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+
     // If quizId is provided, fetch specifically for that quiz
     if (quizId) {
       const { data: reports, error } = await supabase
@@ -160,41 +224,134 @@ export async function GET(request: Request) {
       if (error) {
         return NextResponse.json({ error: error.message }, { status: 500 })
       }
-      return NextResponse.json({ reports: reports || [] })
+
+      const matchingMat = materials?.find(m => reports?.[0]?.material_id === m.id)
+      return NextResponse.json({
+        reports: reports || [],
+        activeMaterialId: reports?.[0]?.material_id || null,
+        activeMaterialTitle: matchingMat?.title || null,
+      })
     }
 
-    // If no materialId provided and not 'all', default to latest material
-    if (!materialId) {
-      const { data: latestMat } = await supabase
-        .from('materials')
-        .select('id')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle()
+    // Determine active material
+    let activeMaterialId: string | null = null
+    let activeMaterialTitle: string | null = null
 
-      if (latestMat) {
-        materialId = latestMat.id
-      }
+    if (materialId === 'all') {
+      activeMaterialId = 'all'
+      activeMaterialTitle = 'All Materials'
+    } else if (materialId && materials?.some(m => m.id === materialId)) {
+      activeMaterialId = materialId
+      activeMaterialTitle = materials.find(m => m.id === materialId)?.title || null
+    } else if (materials && materials.length > 0) {
+      activeMaterialId = materials[0].id
+      activeMaterialTitle = materials[0].title
     }
 
+    // Query gap reports
     let query = supabase
       .from('gap_reports')
       .select('*')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
 
-    if (materialId && materialId !== 'all') {
-      query = query.eq('material_id', materialId)
+    if (activeMaterialId && activeMaterialId !== 'all') {
+      query = query.eq('material_id', activeMaterialId)
     }
 
-    const { data: reports, error } = await query
+    let { data: reports, error } = await query
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
 
-    return NextResponse.json({ reports: reports || [], materialId: materialId || null })
+    // Auto-generate reports if user has completed quizzes for this material but no reports exist yet
+    if ((!reports || reports.length === 0) && activeMaterialId && activeMaterialId !== 'all') {
+      const { data: completedQuiz } = await supabase
+        .from('quizzes')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('material_id', activeMaterialId)
+        .eq('status', 'completed')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      if (completedQuiz) {
+        // Find questions & answers to auto-populate reports
+        const { data: qQuestions } = await supabase
+          .from('quiz_questions')
+          .select('*, topics(name)')
+          .eq('quiz_id', completedQuiz.id)
+
+        const { data: qAnswers } = await supabase
+          .from('quiz_answers')
+          .select('*')
+          .eq('quiz_id', completedQuiz.id)
+          .eq('user_id', user.id)
+
+        if (qQuestions && qQuestions.length > 0) {
+          const generatedReports = []
+          const topicMap: Record<string, { name: string; total: number; correct: number }> = {}
+
+          for (const q of qQuestions) {
+            const ans = (qAnswers || []).find(a => a.question_id === q.id)
+            const tId = q.topic_id || 'unknown'
+            const tName = (q.topics as any)?.name || 'General Concepts'
+
+            if (!topicMap[tId]) {
+              topicMap[tId] = { name: tName, total: 0, correct: 0 }
+            }
+            topicMap[tId].total++
+            if (ans?.is_correct) topicMap[tId].correct++
+          }
+
+          for (const [tId, tData] of Object.entries(topicMap)) {
+            if (tId === 'unknown') continue
+            const score = tData.total > 0 ? Math.round((tData.correct / tData.total) * 100) : 0
+            const strength: 'weak' | 'medium' | 'strong' = score < 40 ? 'weak' : score < 70 ? 'medium' : 'strong'
+            const reason = strength === 'weak'
+              ? `Diagnostic assessment revealed knowledge gaps in ${tData.name} (${tData.correct}/${tData.total} correct, ${score}%).`
+              : strength === 'medium'
+              ? `Demonstrated moderate understanding of ${tData.name} (${tData.correct}/${tData.total} correct, ${score}%).`
+              : `Demonstrated solid mastery of ${tData.name} (${tData.correct}/${tData.total} correct, ${score}%).`
+
+            const { data: newReport } = await supabase
+              .from('gap_reports')
+              .insert({
+                user_id: user.id,
+                quiz_id: completedQuiz.id,
+                topic_id: tId,
+                material_id: activeMaterialId,
+                topic_name: tData.name,
+                strength,
+                score,
+                total_questions: tData.total,
+                correct_answers: tData.correct,
+                reason,
+                suggestions: [
+                  `Review key definitions and core mechanisms for ${tData.name}.`,
+                  `Practice targeted questions focusing on ${tData.name}.`,
+                ],
+              })
+              .select()
+              .single()
+
+            if (newReport) generatedReports.push(newReport)
+          }
+
+          if (generatedReports.length > 0) {
+            reports = generatedReports
+          }
+        }
+      }
+    }
+
+    return NextResponse.json({
+      reports: reports || [],
+      activeMaterialId,
+      activeMaterialTitle,
+    })
   } catch (error) {
     console.error('Gap reports fetch error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })

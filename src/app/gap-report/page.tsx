@@ -15,6 +15,7 @@ import {
   LuLoader,
   LuBrain,
   LuLightbulb,
+  LuRefreshCw,
 } from 'react-icons/lu'
 
 interface GapReportItem {
@@ -52,6 +53,7 @@ function GapReportContent() {
   const [activeMaterialId, setActiveMaterialId] = useState<string | null>(urlMaterialId)
   const [activeMaterialTitle, setActiveMaterialTitle] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [analyzingGaps, setAnalyzingGaps] = useState(false)
   const [filter, setFilter] = useState<'all' | 'weak' | 'medium' | 'strong'>('all')
   const [availableHours, setAvailableHours] = useState(8)
   const [generatingPlan, setGeneratingPlan] = useState(false)
@@ -90,12 +92,37 @@ function GapReportContent() {
         const currentMat = matList.find((m) => m.id === currentMatId)
         if (currentMat) {
           setActiveMaterialTitle(currentMat.title)
+        } else if (data.activeMaterialTitle) {
+          setActiveMaterialTitle(data.activeMaterialTitle)
         }
       }
     } catch (err) {
       console.error('Error fetching gap reports:', err)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleRunAnalysisNow = async () => {
+    try {
+      setAnalyzingGaps(true)
+      setPlanError(null)
+      const res = await fetch('/api/gap-analysis', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ materialId: activeMaterialId }),
+      })
+      if (res.ok) {
+        await fetchReportsAndMaterials(activeMaterialId)
+      } else {
+        const errData = await res.json().catch(() => ({}))
+        setPlanError(errData.error || 'Failed to analyze completed quizzes. Take a diagnostic quiz first.')
+      }
+    } catch (err: any) {
+      console.error('Manual gap analysis error:', err)
+      setPlanError(err?.message || 'Network error running gap analysis.')
+    } finally {
+      setAnalyzingGaps(false)
     }
   }
 
@@ -177,9 +204,18 @@ function GapReportContent() {
               onSelectMaterial={handleMaterialChange}
             />
           )}
+          <button
+            onClick={handleRunAnalysisNow}
+            disabled={analyzingGaps}
+            className="btn-secondary text-xs py-2 px-3 flex items-center gap-1.5"
+            id="reanalyze-gaps-btn"
+          >
+            <LuRefreshCw size={14} className={analyzingGaps ? 'animate-spin' : ''} />
+            <span>{analyzingGaps ? 'Analyzing Quizzes...' : 'Analyze Completed Quizzes'}</span>
+          </button>
           <Link
             href={activeMaterialId && activeMaterialId !== 'all' ? `/quiz?materialId=${activeMaterialId}` : '/quiz'}
-            className="btn-secondary text-xs py-2 px-3 flex items-center gap-1.5"
+            className="btn-primary text-xs py-2 px-3 flex items-center gap-1.5"
           >
             <LuBrain size={14} />
             <span>Retake Diagnostic Quiz</span>
@@ -299,13 +335,21 @@ function GapReportContent() {
                   : 'Take a diagnostic quiz to generate your first knowledge gap diagnosis, or preload sample course data.'}
               </p>
             </div>
-            <div className="flex justify-center gap-3">
+            <div className="flex justify-center flex-wrap gap-3">
               <Link
                 href={activeMaterialId && activeMaterialId !== 'all' ? `/quiz?materialId=${activeMaterialId}` : '/quiz'}
                 className="btn-primary text-xs py-2 px-4"
               >
                 {activeMaterialTitle ? `Diagnose ${activeMaterialTitle}` : 'Take Diagnostic Quiz'}
               </Link>
+              <button
+                onClick={handleRunAnalysisNow}
+                disabled={analyzingGaps}
+                className="btn-secondary text-xs py-2 px-4 flex items-center gap-1.5"
+              >
+                <LuRefreshCw size={14} className={analyzingGaps ? 'animate-spin' : ''} />
+                <span>{analyzingGaps ? 'Analyzing Quizzes...' : 'Analyze Completed Quizzes'}</span>
+              </button>
               <Link href="/dashboard" className="btn-secondary text-xs py-2 px-4">
                 Preload Demo Course
               </Link>

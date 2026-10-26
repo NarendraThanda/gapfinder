@@ -7,6 +7,16 @@ import { createClient } from '@/lib/supabase/client'
 import { LuSparkles, LuMail, LuLock, LuEye, LuEyeOff, LuUser, LuLoader, LuCircleCheck, LuTriangleAlert, LuArrowRight } from 'react-icons/lu'
 import { FcGoogle } from 'react-icons/fc'
 
+function getCanonicalAuthOrigin(): string {
+  if (typeof window !== 'undefined') {
+    const origin = window.location.origin
+    if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
+      return origin
+    }
+  }
+  return process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, '') || 'https://gapfinder-kappa.vercel.app'
+}
+
 export default function SignUpPage() {
   const router = useRouter()
   const [fullName, setFullName] = useState('')
@@ -74,6 +84,7 @@ export default function SignUpPage() {
           data: {
             full_name: trimmedName,
           },
+          emailRedirectTo: `${getCanonicalAuthOrigin()}/auth/callback?next=/dashboard`,
         },
       })
 
@@ -84,8 +95,13 @@ export default function SignUpPage() {
 
       if (data?.session) {
         // Auto-confirmed or confirmations disabled -> immediate session
-        router.push('/dashboard')
-        router.refresh()
+        const canonical = getCanonicalAuthOrigin()
+        if (typeof window !== 'undefined' && !window.location.origin.includes('localhost') && window.location.origin !== canonical) {
+          window.location.href = `${canonical}/dashboard`
+        } else {
+          router.push('/dashboard')
+          router.refresh()
+        }
       } else {
         // Email confirmation is required by Supabase
         setSuccess(
@@ -109,7 +125,7 @@ export default function SignUpPage() {
       const { error: authError } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: `${window.location.origin}/auth/callback?next=/dashboard`,
+          redirectTo: `${getCanonicalAuthOrigin()}/auth/callback?next=/dashboard`,
         },
       })
 
@@ -140,8 +156,13 @@ export default function SignUpPage() {
       }
 
       if (data?.session) {
-        router.push('/dashboard')
-        router.refresh()
+        const canonical = getCanonicalAuthOrigin()
+        if (typeof window !== 'undefined' && !window.location.origin.includes('localhost') && window.location.origin !== canonical) {
+          window.location.href = `${canonical}/dashboard`
+        } else {
+          router.push('/dashboard')
+          router.refresh()
+        }
       } else {
         setError('Demo account session could not be established.')
       }

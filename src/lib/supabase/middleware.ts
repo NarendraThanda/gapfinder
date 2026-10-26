@@ -54,17 +54,22 @@ export async function updateSession(request: NextRequest) {
       request.nextUrl.pathname.startsWith(path)
     )
 
-    if (!user && isProtectedRoute) {
-      const url = request.nextUrl.clone()
-      url.pathname = '/auth/login'
-      return NextResponse.redirect(url)
+    // Helper to get safe canonical base URL for redirects to prevent 404 DEPLOYMENT_NOT_FOUND
+    const getCanonicalBase = () => {
+      const host = request.headers.get('x-forwarded-host') || request.headers.get('host') || ''
+      if (host.includes('localhost') || host.includes('127.0.0.1')) {
+        return `http://${host}`
+      }
+      return process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, '') || 'https://gapfinder-kappa.vercel.app'
     }
 
-    // If user is logged in and tries to access auth pages, redirect to dashboard
-    if (user && request.nextUrl.pathname.startsWith('/auth/')) {
-      const url = request.nextUrl.clone()
-      url.pathname = '/dashboard'
-      return NextResponse.redirect(url)
+    if (!user && isProtectedRoute) {
+      return NextResponse.redirect(new URL('/auth/login', getCanonicalBase()))
+    }
+
+    // If user is logged in and tries to access auth pages (do NOT intercept /auth/callback!), redirect to dashboard
+    if (user && request.nextUrl.pathname.startsWith('/auth/') && !request.nextUrl.pathname.startsWith('/auth/callback')) {
+      return NextResponse.redirect(new URL('/dashboard', getCanonicalBase()))
     }
 
     return supabaseResponse

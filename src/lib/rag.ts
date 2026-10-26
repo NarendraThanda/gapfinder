@@ -377,12 +377,13 @@ export async function ragChat(
   chatHistory: { role: string; content: string }[] = []
 ): Promise<{ answer: string; citations: { source: string; content: string }[] }> {
   const historyStr = chatHistory
-    .slice(-6) // Last 6 messages for context
+    .slice(-6)
     .map(m => `${m.role}: ${m.content}`)
     .join('\n')
 
-  const result = await generateJSON<{ answer: string; citations: { source: string; content: string }[] }>(
-    `Answer the student's question using ONLY the provided study material. Include citations.
+  try {
+    const result = await generateJSON<{ answer: string; citations: { source: string; content: string }[] }>(
+      `Answer the student's question using the provided study material. Include citations.
 
 STUDY MATERIAL CONTEXT:
 ${context}
@@ -392,17 +393,53 @@ ${historyStr ? `CONVERSATION HISTORY:\n${historyStr}\n` : ''}
 STUDENT'S QUESTION: ${question}
 
 Return JSON with:
-- "answer": comprehensive answer using only the provided material (string, use markdown formatting)
-- "citations": array of { "source": "material section", "content": "relevant quote from material" }
+- "answer": comprehensive answer using the provided material (string, use clean markdown formatting)
+- "citations": array of { "source": "material section or title", "content": "relevant quote or summary" }
 
 Rules:
-1. ONLY use information from the provided material
-2. If the material doesn't contain enough info, say so clearly
-3. Always include at least one citation
-4. Use clear, educational language`,
-    'You are a helpful study assistant. Answer questions using ONLY the provided study material. Always cite your sources. Be educational and thorough.'
-  )
-  return result
+1. Ground your response in the provided material.
+2. If the question is a greeting or general study question, answer helpfully while referencing how the materials relate.
+3. Use clear, educational language.`,
+      'You are an expert AI tutor. Answer questions using the provided study material. Always cite your sources. Be educational and thorough.'
+    )
+
+    if (result && typeof result.answer === 'string' && result.answer.trim().length > 0) {
+      return {
+        answer: result.answer.trim(),
+        citations: Array.isArray(result.citations) ? result.citations : [],
+      }
+    }
+  } catch (err) {
+    console.warn('ragChat JSON generation failed, falling back to direct text generation:', err)
+  }
+
+  // Robust fallback: generate plain text answer
+  try {
+    const textAnswer = await generateText(
+      `You are a knowledgeable AI tutor. Answer the student's question using the provided study material context.
+
+STUDY MATERIAL CONTEXT:
+${context}
+
+${historyStr ? `CONVERSATION HISTORY:\n${historyStr}\n` : ''}
+
+STUDENT'S QUESTION: ${question}
+
+Provide a clear, educational, and well-structured markdown answer. Cite the relevant material where possible.`,
+      'You are a helpful educational tutor.'
+    )
+
+    return {
+      answer: textAnswer || "I'm having trouble analyzing the study material right now. Please try again.",
+      citations: context ? [{ source: 'Study Material', content: context.slice(0, 150) + '...' }] : [],
+    }
+  } catch (fallbackErr) {
+    console.error('ragChat fallback failed:', fallbackErr)
+    return {
+      answer: "I'm currently unable to retrieve a response from the AI tutor. Please check your connection and try again.",
+      citations: [],
+    }
+  }
 }
 
 // ===== VECTOR SEARCH =====
@@ -419,7 +456,7 @@ export async function searchSimilarChunks(
     query_embedding: embedding,
     match_user_id: userId,
     match_count: limit,
-    match_threshold: 0.3,
+    match_threshold: 0.15,
   }
   if (materialId) {
     params.match_material_id = materialId

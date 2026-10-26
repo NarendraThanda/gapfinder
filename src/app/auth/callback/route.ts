@@ -7,18 +7,14 @@ export async function GET(request: Request) {
   const next = requestUrl.searchParams.get('next') ?? '/dashboard'
 
   // Determine the canonical public origin
-  // On Vercel, x-forwarded-host preserves the exact public domain the user visited (e.g. gapfinder-kappa.vercel.app)
-  // whereas requestUrl.origin can point to an internal ephemeral deployment URL that causes 404 DEPLOYMENT_NOT_FOUND.
-  const forwardedHost = request.headers.get('x-forwarded-host')
-  const forwardedProto = request.headers.get('x-forwarded-proto') ?? 'https'
-
+  // In production, ALWAYS redirect to the canonical production URL (or localhost in dev)
+  // to avoid ephemeral Vercel deployment hashes that produce 404 DEPLOYMENT_NOT_FOUND
+  const host = request.headers.get('x-forwarded-host') || request.headers.get('host') || ''
   let baseUrl: string
-  if (forwardedHost) {
-    baseUrl = `${forwardedProto}://${forwardedHost}`
-  } else if (process.env.NEXT_PUBLIC_SITE_URL) {
-    baseUrl = process.env.NEXT_PUBLIC_SITE_URL.replace(/\/$/, '')
+  if (host.includes('localhost') || host.includes('127.0.0.1')) {
+    baseUrl = `http://${host}`
   } else {
-    baseUrl = 'https://gapfinder-kappa.vercel.app'
+    baseUrl = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, '') || 'https://gapfinder-kappa.vercel.app'
   }
 
   // Ensure target path is valid
