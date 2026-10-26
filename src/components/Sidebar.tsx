@@ -94,7 +94,12 @@ export default function Sidebar() {
       )}
 
       {/* Sidebar */}
-      <aside className={`sidebar ${isOpen ? 'open' : ''}`}>
+      <aside
+        className={`w-[260px] shrink-0 bg-[#0b0c1a]/95 backdrop-blur-xl border-r border-[var(--border-glass)] z-50 transition-transform duration-300 fixed inset-y-0 left-0 md:sticky md:top-0 md:h-screen md:translate-x-0 overflow-y-auto ${
+          isOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
+        style={{ width: '260px' }}
+      >
         <div className="flex flex-col h-full p-4">
           {/* Logo & Mobile Close */}
           <div className="flex items-center justify-between mb-8 px-2 pt-2">
