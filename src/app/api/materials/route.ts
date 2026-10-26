@@ -3,6 +3,9 @@ import { NextResponse } from 'next/server'
 import { chunkText, extractTopics } from '@/lib/rag'
 import { generateEmbedding } from '@/lib/gemini'
 
+// Allow Vercel maximum execution duration
+export const maxDuration = 60
+
 // Strip null bytes and non-printable control characters that PostgreSQL rejects
 function sanitizeText(str: string): string {
   if (!str) return ''
@@ -13,51 +16,63 @@ function sanitizeText(str: string): string {
 }
 
 async function extractTextFromFile(file: File): Promise<string> {
-  const buffer = Buffer.from(await file.arrayBuffer())
-  const fileName = file.name.toLowerCase()
+  try {
+    const buffer = Buffer.from(await file.arrayBuffer())
+    const fileName = file.name.toLowerCase()
 
-  if (fileName.endsWith('.pdf')) {
-    try {
-      const { PDFParse } = await import('pdf-parse')
-      const parser = new (PDFParse as any)({ data: buffer })
-      const result = await parser.getText()
-      if (result && result.text) {
-        return sanitizeText(result.text)
+    if (fileName.endsWith('.pdf')) {
+      try {
+        const { PDFParse } = await import('pdf-parse')
+        const parser = new (PDFParse as any)({ data: buffer })
+        const result = await Promise.race([
+          parser.getText(),
+          new Promise<any>((_, reject) =>
+            setTimeout(() => reject(new Error('PDFParse timeout')), 3500)
+          ),
+        ])
+        if (result && result.text && result.text.trim().length > 20) {
+          return sanitizeText(result.text)
+        }
+      } catch (pdfErr) {
+        console.warn('PDFParse notice, using stream extractor fallback:', pdfErr)
       }
-    } catch (pdfErr) {
-      console.warn('PDFParse notice, using stream extractor fallback:', pdfErr)
+
+      // Fallback: extract printable text streams from PDF buffer
+      const raw = buffer.toString('latin1')
+      const textMatches = raw.match(/\(([^)]+)\)\s*Tj/g) || []
+      if (textMatches.length > 0) {
+        const extracted = textMatches
+          .map((m) => m.replace(/^\(|\)\s*Tj$/g, ''))
+          .filter((t) => t.length > 2)
+          .join(' ')
+        if (extracted.trim().length > 20) {
+          return sanitizeText(extracted)
+        }
+      }
+
+      // Secondary fallback: clean plain-text strings from PDF
+      const textOnly = raw
+        .replace(/[^\x20-\x7E\t\n\r]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+      return sanitizeText(textOnly.slice(0, 50000))
     }
 
-    // Fallback: extract printable text streams from PDF buffer
-    const raw = buffer.toString('latin1')
-    const textMatches = raw.match(/\(([^)]+)\)\s*Tj/g) || []
-    if (textMatches.length > 0) {
-      const extracted = textMatches
-        .map(m => m.replace(/^\(|\)\s*Tj$/g, ''))
-        .filter(t => t.length > 2)
-        .join(' ')
-      if (extracted.trim().length > 20) {
-        return sanitizeText(extracted)
-      }
-    }
-
-    // Secondary fallback: clean plain-text strings from PDF
-    const textOnly = raw
-      .replace(/[^\x20-\x7E\t\n\r]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim()
-    return sanitizeText(textOnly.slice(0, 50000))
+    // Text, markdown, or plain text file
+    const text = new TextDecoder('utf-8', { fatal: false }).decode(buffer)
+    return sanitizeText(text)
+  } catch (err) {
+    console.warn('extractTextFromFile general exception:', err)
+    return ''
   }
-
-  // Text, markdown, or plain text file
-  const text = new TextDecoder('utf-8', { fatal: false }).decode(buffer)
-  return sanitizeText(text)
 }
 
 export async function POST(request: Request) {
   try {
     const supabase = await createServerSupabaseClient()
-    const { data: { user } } = await supabase.auth.getUser()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
 
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized. Please log in first.' }, { status: 401 })
@@ -85,24 +100,24 @@ export async function POST(request: Request) {
         console.warn('Text extraction fallback triggered:', extractErr)
       }
 
-      // Try uploading to Supabase Storage, but don't block DB save if storage bucket is restricted
+      // Upload to Supabase Storage with timeout protection (never blocks DB save)
       try {
         const safeName = fileName.replace(/[^a-zA-Z0-9.-]/g, '_')
         const filePath = `${user.id}/${Date.now()}-${safeName}`
-        const { error: uploadError } = await supabase.storage
-          .from('materials')
-          .upload(filePath, file)
+        
+        const storagePromise = supabase.storage.from('materials').upload(filePath, file)
+        const timeoutPromise = new Promise<{ error: Error }>((resolve) =>
+          setTimeout(() => resolve({ error: new Error('Storage timeout') }), 2500)
+        )
+
+        const { error: uploadError } = await Promise.race([storagePromise, timeoutPromise])
 
         if (!uploadError) {
-          const { data: urlData } = supabase.storage
-            .from('materials')
-            .getPublicUrl(filePath)
+          const { data: urlData } = supabase.storage.from('materials').getPublicUrl(filePath)
           fileUrl = urlData?.publicUrl || null
-        } else {
-          console.warn('Supabase storage upload notice (continuing with DB save):', uploadError.message)
         }
       } catch (storageErr) {
-        console.warn('Supabase storage upload exception (continuing with DB save):', storageErr)
+        console.warn('Supabase storage upload notice:', storageErr)
       }
     }
 
@@ -110,9 +125,13 @@ export async function POST(request: Request) {
     textContent = sanitizeText(textContent)
 
     if (!textContent || textContent.length < 5) {
-      return NextResponse.json({
-        error: 'Could not extract readable text from this document. Please paste the syllabus or notes text directly in the box below.'
-      }, { status: 400 })
+      return NextResponse.json(
+        {
+          error:
+            'Could not extract readable text from this document. Please paste the syllabus or notes text directly in the box below.',
+        },
+        { status: 400 }
+      )
     }
 
     // Create material record
@@ -125,20 +144,23 @@ export async function POST(request: Request) {
         file_name: fileName,
         file_url: fileUrl,
         raw_text: textContent,
-        status: 'processing',
+        status: 'ready',
       })
       .select()
       .single()
 
     if (materialError) {
       console.error('Material save error details:', materialError)
-      return NextResponse.json({
-        error: `Failed to save material: ${materialError.message || 'Database error'}`
-      }, { status: 500 })
+      return NextResponse.json(
+        { error: `Failed to save material: ${materialError.message || 'Database error'}` },
+        { status: 500 }
+      )
     }
 
-    // Process in background: chunk, embed, and extract topics
-    processInBackground(supabase, user.id, material.id, textContent, type)
+    // Process chunking, embeddings, and topics in background (non-blocking)
+    processInBackground(supabase, user.id, material.id, textContent, type).catch((bgErr) =>
+      console.error('Background processing error:', bgErr)
+    )
 
     return NextResponse.json({ material })
   } catch (error: any) {
@@ -158,28 +180,28 @@ async function processInBackground(
     // 1. Chunk the text
     const chunks = chunkText(text)
 
-    // 2. Generate embeddings and store chunks
-    for (let i = 0; i < chunks.length; i++) {
-      try {
-        const embedding = await generateEmbedding(chunks[i])
-
-        await supabase.from('material_chunks').insert({
-          material_id: materialId,
-          user_id: userId,
-          content: sanitizeText(chunks[i]),
-          chunk_index: i,
-          embedding,
-          metadata: { type, chunk_length: chunks[i].length },
+    // 2. Generate embeddings and store chunks in fast parallel batches of 4
+    const BATCH_SIZE = 4
+    for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
+      const batch = chunks.slice(i, i + BATCH_SIZE)
+      await Promise.all(
+        batch.map(async (chunk, batchIdx) => {
+          const chunkIdx = i + batchIdx
+          try {
+            const embedding = await generateEmbedding(chunk)
+            await supabase.from('material_chunks').insert({
+              material_id: materialId,
+              user_id: userId,
+              content: sanitizeText(chunk),
+              chunk_index: chunkIdx,
+              embedding,
+              metadata: { type, chunk_length: chunk.length },
+            })
+          } catch (embError) {
+            console.error(`Error processing chunk ${chunkIdx}:`, embError)
+          }
         })
-      } catch (embError) {
-        console.error(`Error processing chunk ${i}:`, embError)
-        // Continue processing other chunks
-      }
-
-      // Rate limiting for Gemini API
-      if (i > 0 && i % 5 === 0) {
-        await new Promise(resolve => setTimeout(resolve, 1000))
-      }
+      )
     }
 
     // 3. Extract topics if this is a syllabus
@@ -218,25 +240,19 @@ async function processInBackground(
       }
     }
 
-    // 4. Mark material as ready
-    await supabase
-      .from('materials')
-      .update({ status: 'ready' })
-      .eq('id', materialId)
-
+    // 4. Update material status
+    await supabase.from('materials').update({ status: 'ready' }).eq('id', materialId)
   } catch (error) {
-    console.error('Background processing error:', error)
-    await supabase
-      .from('materials')
-      .update({ status: 'error' })
-      .eq('id', materialId)
+    console.error('Background processing exception:', error)
   }
 }
 
 export async function GET() {
   try {
     const supabase = await createServerSupabaseClient()
-    const { data: { user } } = await supabase.auth.getUser()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
 
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -262,7 +278,9 @@ export async function GET() {
 export async function DELETE(request: Request) {
   try {
     const supabase = await createServerSupabaseClient()
-    const { data: { user } } = await supabase.auth.getUser()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
 
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })

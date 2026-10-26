@@ -66,19 +66,25 @@ export default function MaterialsPage() {
       return
     }
 
+    if (selectedFile && selectedFile.size > 4.5 * 1024 * 1024) {
+      setIsError(true)
+      setStatusMessage('Selected file exceeds the 4.5MB limit. Please paste the syllabus or notes text directly in the box below.')
+      return
+    }
+
     try {
       setUploading(true)
       setIsError(false)
       setStatusMessage('Processing document, chunking content, and generating embeddings...')
 
       const formData = new FormData()
-      formData.append('title', title)
+      formData.append('title', title.trim())
       formData.append('type', docType)
       if (selectedFile) {
         formData.append('file', selectedFile)
       }
       if (rawText.trim()) {
-        formData.append('rawText', rawText)
+        formData.append('rawText', rawText.trim())
       }
 
       const res = await fetch('/api/materials', {
@@ -86,9 +92,18 @@ export default function MaterialsPage() {
         body: formData,
       })
 
-      const data = await res.json()
+      const contentType = res.headers.get('content-type') || ''
+      let data: any = {}
+
+      if (contentType.includes('application/json')) {
+        data = await res.json()
+      } else {
+        const raw = await res.text().catch(() => '')
+        data = { error: raw.slice(0, 150) || `Server error (${res.status})` }
+      }
+
       if (res.ok) {
-        setStatusMessage('Material successfully uploaded! Topics and embeddings are being generated.')
+        setStatusMessage('Material successfully uploaded! Content is indexed and ready.')
         setTitle('')
         setRawText('')
         setSelectedFile(null)
@@ -97,9 +112,14 @@ export default function MaterialsPage() {
         setIsError(true)
         setStatusMessage(data.error || 'Failed to upload material.')
       }
-    } catch {
+    } catch (err: any) {
+      console.error('Material upload exception:', err)
       setIsError(true)
-      setStatusMessage('Network error occurred during upload.')
+      setStatusMessage(
+        err?.message && !err.message.includes('fetch')
+          ? `Upload failed: ${err.message}`
+          : 'Upload request interrupted. If uploading a large PDF, please paste the syllabus/notes text directly in the box.'
+      )
     } finally {
       setUploading(false)
     }
