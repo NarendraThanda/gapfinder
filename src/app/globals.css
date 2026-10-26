@@ -566,12 +566,41 @@ body {
   box-shadow: var(--shadow-card);
 }
 
-/* ===== Responsive ===== */
-@media (max-width: 768px) {
+/* ===== Responsive Shell & Overlap Prevention ===== */
+.app-main-content {
+  flex: 1;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  z-index: 10;
+  width: 100%;
+  overflow-x: hidden;
+}
+
+@media (min-width: 768px) {
+  .sidebar {
+    transform: translateX(0) !important;
+  }
+  .app-main-content {
+    margin-left: 260px !important;
+    width: calc(100% - 260px) !important;
+    padding: 2rem !important;
+  }
+}
+
+@media (max-width: 767px) {
   .sidebar {
     transform: translateX(-100%);
   }
   .sidebar.open {
     transform: translateX(0);
+    box-shadow: 0 0 50px rgba(0, 0, 0, 0.9);
+  }
+  .app-main-content {
+    margin-left: 0 !important;
+    width: 100% !important;
+    padding: 1rem !important;
+    padding-top: 4.75rem !important; /* Prevents mobile top bar / toggle from overlapping content */
   }
 }
