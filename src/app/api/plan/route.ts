@@ -167,8 +167,8 @@ export async function POST(request: Request) {
       topic_name: string
       strength: 'weak' | 'medium' | 'strong'
       score: number
-      reason?: string
-      suggestions?: string[]
+      reason: string
+      suggestions: string[]
     }> = []
 
     let allTopics: string[] = []
@@ -185,10 +185,12 @@ export async function POST(request: Request) {
       gapReportIds = Object.values(latestPerTopic).map((r) => r.id)
       gapData = Object.values(latestPerTopic).map((r) => ({
         topic_name: r.topic_name,
-        strength: r.strength as 'weak' | 'medium' | 'strong',
-        score: r.score,
-        reason: r.reason,
-        suggestions: r.suggestions,
+        strength: (['weak', 'medium', 'strong'].includes(r.strength) ? r.strength : 'medium') as 'weak' | 'medium' | 'strong',
+        score: r.score || 50,
+        reason: r.reason || 'Topic identified from diagnostic quiz performance.',
+        suggestions: Array.isArray(r.suggestions) && r.suggestions.length > 0
+          ? r.suggestions
+          : ['Review lecture notes and key formulas', 'Practice problem solving'],
       }))
       allTopics = Object.values(latestPerTopic).map((r) => r.topic_name)
     } else {
@@ -205,7 +207,7 @@ export async function POST(request: Request) {
           strength: (t.strength === 'untested' ? 'weak' : t.strength) as 'weak' | 'medium' | 'strong',
           score: t.score || (t.strength === 'weak' ? 33 : t.strength === 'medium' ? 60 : 85),
           reason: t.description || 'Topic identified for structured revision.',
-          suggestions: ['Review core definitions and key problems.'],
+          suggestions: ['Review core definitions and key problems.', 'Complete practice quizzes.'],
         }))
         allTopics = userTopics.map((t) => t.name)
       } else {
