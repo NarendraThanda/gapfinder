@@ -122,15 +122,17 @@ export default function SignUpPage() {
 
     try {
       const supabase = createClient()
-      const { error: authError } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
         options: {
-          redirectTo: `${getCanonicalAuthOrigin()}/auth/callback?next=/dashboard`,
+          redirectTo:
+            "https://gapfinder-kappa.vercel.app/auth/callback",
         },
-      })
+      });
 
-      if (authError) {
-        setError(formatSignUpError(authError))
+      if (error) {
+        console.error("Google sign-in failed:", error.message);
+        setError(formatSignUpError(error))
         setGoogleLoading(false)
       }
     } catch (err: any) {
