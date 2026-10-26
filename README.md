@@ -195,6 +195,40 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ---
 
+## 🌐 Deploy to Vercel (Production Ready)
+
+GapFinder AI is pre-configured for 1-click deployment on **Vercel**.
+
+### Step 1: Push your code to GitHub
+```bash
+git add .
+git commit -m "feat: ready for vercel deployment"
+git push origin main
+```
+
+### Step 2: Import into Vercel
+1. Log in to [Vercel](https://vercel.com) and click **"Add New Project"**.
+2. Select your `gapfinder-ai` repository.
+3. Keep default settings (`Framework Preset: Next.js`, `Build Command: next build`).
+
+### Step 3: Configure Environment Variables (Hidden & Secure)
+In Vercel **Project Settings > Environment Variables**, add:
+
+| Variable Name | Description | Example / Location |
+| :--- | :--- | :--- |
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase Project URL | `https://ypjbmvyvemelyxfunjij.supabase.co` |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Supabase Anon / Publishable Key | Supabase Dashboard > Settings > API |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | (Optional fallback) | Same as publishable key |
+| `GEMINI_API_KEY` | Google Gemini API Key | [Google AI Studio](https://aistudio.google.com/app/apikey) |
+| `NEXT_PUBLIC_APP_URL` | Production Domain | `https://your-project.vercel.app` |
+
+> 🔒 **Security Guarantee:** All real API keys (`GEMINI_API_KEY`, etc.) are hidden in Vercel environment variables and excluded from Git commits via `.gitignore`. The Gemini key is only invoked from server-side API routes and is never sent to the client browser.
+
+### Step 4: Click "Deploy"
+Vercel will compile the Next.js production build and deploy your app with global Edge caching and serverless API execution.
+
+---
+
 ## 🔭 Limitations & Future Enhancements
 
 ### Current Limitations
