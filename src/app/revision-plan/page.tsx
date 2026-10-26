@@ -8,11 +8,12 @@ import {
   LuClock,
   LuCircleCheck,
   LuSparkles,
-  LuArrowRight,
   LuBookOpen,
   LuLoader,
-  LuRotateCcw,
   LuLayers,
+  LuTriangleAlert,
+  LuCheck,
+  LuHistory,
 } from 'react-icons/lu'
 
 interface PlanItem {
@@ -23,6 +24,8 @@ interface PlanItem {
   resources: string[]
   completed: boolean
   strength: 'weak' | 'medium' | 'strong'
+  suggestions?: string[]
+  reason?: string
 }
 
 interface RevisionPlanRecord {
@@ -34,28 +37,116 @@ interface RevisionPlanRecord {
   created_at: string
 }
 
+// Client-side defensive helpers to guarantee rendering never throws on older/malformed DB records
+function getSafeActivities(item: PlanItem): string[] {
+  if (Array.isArray(item.activities) && item.activities.length > 0) {
+    return item.activities.map(String)
+  }
+  if (Array.isArray(item.suggestions) && item.suggestions.length > 0) {
+    return item.suggestions.map(String)
+  }
+  if (item.reason) {
+    return [
+      `Review key concepts: ${item.reason}`,
+      'Solve targeted practice exercises and verify solutions',
+    ]
+  }
+  return [
+    'Review core lecture notes and key formulas',
+    'Practice relevant exam-style problems',
+  ]
+}
+
+function getSafeResources(item: PlanItem): string[] {
+  if (Array.isArray(item.resources) && item.resources.length > 0) {
+    return item.resources.map(String)
+  }
+  if (item.reason) {
+    return [String(item.reason)]
+  }
+  return ['Course Materials & Lecture Notes']
+}
+
+function normalizeClientPlanItem(item: any, idx: number): PlanItem {
+  const rawPriority = String(item?.priority || '').toLowerCase()
+  const rawStrength = String(item?.strength || '').toLowerCase()
+
+  const strength: 'weak' | 'medium' | 'strong' = ['weak', 'medium', 'strong'].includes(rawStrength)
+    ? (rawStrength as 'weak' | 'medium' | 'strong')
+    : rawPriority === 'high'
+    ? 'weak'
+    : rawPriority === 'low'
+    ? 'strong'
+    : 'medium'
+
+  const priority: 'high' | 'medium' | 'low' = ['high', 'medium', 'low'].includes(rawPriority)
+    ? (rawPriority as 'high' | 'medium' | 'low')
+    : strength === 'weak'
+    ? 'high'
+    : strength === 'strong'
+    ? 'low'
+    : 'medium'
+
+  const defaultHours = priority === 'high' ? 4 : priority === 'medium' ? 2.5 : 1.5
+  const estimated_hours =
+    typeof item?.estimated_hours === 'number' && item.estimated_hours > 0
+      ? item.estimated_hours
+      : defaultHours
+
+  const activities = getSafeActivities(item)
+  const resources = getSafeResources(item)
+
+  return {
+    topic_name: String(item?.topic_name || item?.name || `Topic ${idx + 1}`),
+    priority,
+    estimated_hours,
+    activities,
+    resources,
+    completed: Boolean(item?.completed),
+    strength,
+    suggestions: item?.suggestions,
+    reason: item?.reason,
+  }
+}
+
 export default function RevisionPlanPage() {
   const [plans, setPlans] = useState<RevisionPlanRecord[]>([])
   const [activePlan, setActivePlan] = useState<RevisionPlanRecord | null>(null)
   const [loading, setLoading] = useState(true)
   const [hoursInput, setHoursInput] = useState(10)
   const [generating, setGenerating] = useState(false)
+  const [statusMessage, setStatusMessage] = useState<{ type: 'error' | 'success'; text: string } | null>(null)
 
   const fetchPlans = async () => {
     try {
       setLoading(true)
+      setStatusMessage(null)
       const res = await fetch('/api/plan')
       if (res.ok) {
         const data = await res.json()
-        const planList: RevisionPlanRecord[] = data.plans || []
-        setPlans(planList)
-        if (planList.length > 0) {
-          setActivePlan(planList[0])
-          setHoursInput(planList[0].available_hours || 10)
+        const rawList: RevisionPlanRecord[] = data.plans || []
+        const normalizedList = rawList.map((p) => ({
+          ...p,
+          plan_data: (p.plan_data || []).map(normalizeClientPlanItem),
+        }))
+        setPlans(normalizedList)
+        if (normalizedList.length > 0) {
+          setActivePlan(normalizedList[0])
+          setHoursInput(normalizedList[0].available_hours || 10)
         }
+      } else {
+        const errData = await res.json().catch(() => ({}))
+        setStatusMessage({
+          type: 'error',
+          text: errData.error || 'Failed to load revision plans from server.',
+        })
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error fetching plans:', err)
+      setStatusMessage({
+        type: 'error',
+        text: err?.message || 'Network error fetching revision plans.',
+      })
     } finally {
       setLoading(false)
     }
@@ -68,20 +159,37 @@ export default function RevisionPlanPage() {
   const handleGenerateNewPlan = async () => {
     try {
       setGenerating(true)
+      setStatusMessage(null)
       const res = await fetch('/api/plan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ availableHours: hoursInput }),
       })
-      const data = await res.json()
+
+      const data = await res.json().catch(() => ({}))
       if (res.ok && data.plan) {
-        setActivePlan(data.plan)
-        setPlans((prev) => [data.plan, ...prev])
+        const normalizedPlan: RevisionPlanRecord = {
+          ...data.plan,
+          plan_data: (data.plan.plan_data || []).map(normalizeClientPlanItem),
+        }
+        setActivePlan(normalizedPlan)
+        setPlans((prev) => [normalizedPlan, ...prev])
+        setStatusMessage({
+          type: 'success',
+          text: `Revision plan successfully generated for ${hoursInput} hours!`,
+        })
       } else {
-        alert(data.error || 'Could not generate plan. Please take a diagnostic quiz first!')
+        setStatusMessage({
+          type: 'error',
+          text: data.error || 'Could not generate plan. Please try again.',
+        })
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Plan generation error:', err)
+      setStatusMessage({
+        type: 'error',
+        text: err?.message || 'Network error during plan generation.',
+      })
     } finally {
       setGenerating(false)
     }
@@ -95,15 +203,17 @@ export default function RevisionPlanPage() {
       completed: !updatedPlanData[itemIdx].completed,
     }
 
-    // Check if all are completed
     const allDone = updatedPlanData.every((i) => i.completed)
     const newStatus = allDone ? 'completed' : 'active'
 
-    setActivePlan({
+    const updatedPlan: RevisionPlanRecord = {
       ...activePlan,
       plan_data: updatedPlanData,
       status: newStatus,
-    })
+    }
+
+    setActivePlan(updatedPlan)
+    setPlans((prev) => prev.map((p) => (p.id === activePlan.id ? updatedPlan : p)))
 
     try {
       await fetch('/api/plan', {
@@ -120,8 +230,9 @@ export default function RevisionPlanPage() {
     }
   }
 
-  const totalTasks = activePlan?.plan_data?.length || 0
-  const completedTasks = activePlan?.plan_data?.filter((p) => p.completed)?.length || 0
+  const planItems = (activePlan?.plan_data || []).map(normalizeClientPlanItem)
+  const totalTasks = planItems.length
+  const completedTasks = planItems.filter((p) => p.completed).length
   const progressPercent = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0
 
   return (
@@ -130,6 +241,32 @@ export default function RevisionPlanPage() {
       headerSubtitle="Prioritized study schedule allocating maximum hours to identified knowledge gaps"
     >
       <div className="space-y-8 pb-12">
+        {/* Status notification banner */}
+        {statusMessage && (
+          <div
+            className={`p-4 rounded-xl border flex items-center justify-between gap-3 text-sm transition-all ${
+              statusMessage.type === 'error'
+                ? 'bg-red-500/10 border-red-500/30 text-red-300'
+                : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              {statusMessage.type === 'error' ? (
+                <LuTriangleAlert size={18} className="text-red-400 shrink-0" />
+              ) : (
+                <LuCheck size={18} className="text-emerald-400 shrink-0" />
+              )}
+              <span>{statusMessage.text}</span>
+            </div>
+            <button
+              onClick={() => setStatusMessage(null)}
+              className="text-xs opacity-70 hover:opacity-100 underline ml-2"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
         {/* Study Hours Reconfiguration Bar */}
         <div className="glass p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="space-y-1">
@@ -176,6 +313,34 @@ export default function RevisionPlanPage() {
           </div>
         </div>
 
+        {/* Plan History Switcher (if user has multiple saved plans) */}
+        {plans.length > 1 && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs text-gray-400 flex items-center gap-1.5 font-medium mr-1">
+              <LuHistory size={13} /> Saved Plans:
+            </span>
+            {plans.map((p) => {
+              const isSelected = activePlan?.id === p.id
+              return (
+                <button
+                  key={p.id}
+                  onClick={() => {
+                    setActivePlan(p)
+                    setHoursInput(p.available_hours || 10)
+                  }}
+                  className={`text-xs px-3 py-1.5 rounded-lg border transition-all ${
+                    isSelected
+                      ? 'bg-purple-600/30 border-purple-500 text-white font-semibold shadow-sm'
+                      : 'bg-white/5 border-white/10 text-gray-400 hover:text-white hover:bg-white/10'
+                  }`}
+                >
+                  {p.title || `${p.available_hours}h Plan`}
+                </button>
+              )
+            })}
+          </div>
+        )}
+
         {loading ? (
           <div className="glass p-12 text-center text-sm text-gray-400 flex items-center justify-center gap-3">
             <LuLoader className="animate-spin" size={24} />
@@ -187,15 +352,32 @@ export default function RevisionPlanPage() {
             <div>
               <h3 className="text-base font-bold text-white">No Revision Plan Generated Yet</h3>
               <p className="text-xs mt-1 max-w-md mx-auto" style={{ color: 'var(--text-secondary)' }}>
-                A revision plan requires diagnostic data. Take a quiz or preload sample course data to generate a prioritized plan.
+                Click below to instantly create an AI-powered revision plan tailored to your study schedule.
               </p>
             </div>
-            <div className="flex justify-center gap-3">
-              <Link href="/quiz" className="btn-primary text-xs py-2 px-4">
+            <div className="flex flex-wrap justify-center gap-3 pt-2">
+              <button
+                onClick={handleGenerateNewPlan}
+                disabled={generating}
+                className="btn-primary flex items-center gap-2 text-xs py-2.5 px-4"
+              >
+                {generating ? (
+                  <>
+                    <LuLoader className="animate-spin" size={14} />
+                    <span>Creating Plan...</span>
+                  </>
+                ) : (
+                  <>
+                    <LuSparkles size={14} />
+                    <span>Generate Revision Plan Now</span>
+                  </>
+                )}
+              </button>
+              <Link href="/quiz" className="btn-secondary text-xs py-2.5 px-4 flex items-center gap-1.5">
                 Take Diagnostic Quiz
               </Link>
-              <Link href="/dashboard" className="btn-secondary text-xs py-2 px-4">
-                Preload Demo Course
+              <Link href="/dashboard" className="btn-secondary text-xs py-2.5 px-4 flex items-center gap-1.5">
+                Go to Dashboard
               </Link>
             </div>
           </div>
@@ -227,9 +409,11 @@ export default function RevisionPlanPage() {
 
             {/* Plan Items List */}
             <div className="space-y-4">
-              {activePlan.plan_data.map((item, idx) => {
+              {planItems.map((item, idx) => {
                 const isHigh = item.priority === 'high'
                 const isMedium = item.priority === 'medium'
+                const activities = getSafeActivities(item)
+                const resources = getSafeResources(item)
 
                 return (
                   <div
@@ -288,7 +472,7 @@ export default function RevisionPlanPage() {
 
                       <Link
                         href={`/assistant?query=${encodeURIComponent(
-                          `Can you guide me through my revision for ${item.topic_name}? Focus on: ${item.activities.join(
+                          `Can you guide me through my revision for ${item.topic_name}? Focus on: ${activities.join(
                             ', '
                           )}`
                         )}`}
@@ -305,7 +489,7 @@ export default function RevisionPlanPage() {
                         <LuLayers size={13} /> Recommended Revision Activities:
                       </div>
                       <div className="grid md:grid-cols-2 gap-2 text-xs">
-                        {item.activities.map((act, aIdx) => (
+                        {activities.map((act, aIdx) => (
                           <div
                             key={aIdx}
                             className="p-3 rounded-lg border border-white/5 bg-white/[0.01] flex items-start gap-2"
@@ -318,12 +502,12 @@ export default function RevisionPlanPage() {
                     </div>
 
                     {/* Source Resources to Read */}
-                    {item.resources && item.resources.length > 0 && (
+                    {resources.length > 0 && (
                       <div className="mt-3 flex items-center gap-2 flex-wrap text-[11px] text-gray-400">
                         <span className="flex items-center gap-1 text-purple-300 font-semibold">
                           <LuBookOpen size={13} /> Targeted Sections:
                         </span>
-                        {item.resources.map((res, rIdx) => (
+                        {resources.map((res, rIdx) => (
                           <span
                             key={rIdx}
                             className="px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-gray-300"

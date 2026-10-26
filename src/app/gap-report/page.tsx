@@ -49,6 +49,7 @@ function GapReportContent() {
   const [filter, setFilter] = useState<'all' | 'weak' | 'medium' | 'strong'>('all')
   const [availableHours, setAvailableHours] = useState(8)
   const [generatingPlan, setGeneratingPlan] = useState(false)
+  const [planError, setPlanError] = useState<string | null>(null)
 
   const fetchReports = async () => {
     try {
@@ -73,6 +74,7 @@ function GapReportContent() {
   const handleGenerateRevisionPlan = async () => {
     try {
       setGeneratingPlan(true)
+      setPlanError(null)
       const res = await fetch('/api/plan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -81,10 +83,12 @@ function GapReportContent() {
       if (res.ok) {
         router.push('/revision-plan')
       } else {
-        alert('Failed to generate revision plan.')
+        const errData = await res.json().catch(() => ({}))
+        setPlanError(errData.error || 'Failed to generate revision plan. Please try again.')
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Plan generation error:', err)
+      setPlanError(err?.message || 'Network error generating revision plan.')
     } finally {
       setGeneratingPlan(false)
     }
@@ -113,6 +117,19 @@ function GapReportContent() {
       }
     >
       <div className="space-y-8 pb-12">
+        {/* Revision Plan Error Notification */}
+        {planError && (
+          <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-sm flex items-center justify-between">
+            <span>{planError}</span>
+            <button
+              onClick={() => setPlanError(null)}
+              className="text-xs underline opacity-70 hover:opacity-100"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
         {/* Revision Plan Quick-Launcher Banner */}
         <div className="glass p-6 border-l-4 border-l-purple-500 flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div className="space-y-2">
@@ -143,7 +160,7 @@ function GapReportContent() {
 
             <button
               onClick={handleGenerateRevisionPlan}
-              disabled={generatingPlan || reports.length === 0}
+              disabled={generatingPlan}
               className="btn-primary flex items-center gap-2 text-xs py-2.5 px-4"
               id="generate-plan-from-gap-btn"
             >

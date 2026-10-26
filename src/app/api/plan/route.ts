@@ -15,8 +15,20 @@ interface NormalizedPlanItem {
   strength: 'weak' | 'medium' | 'strong'
 }
 
-function normalizePlanItems(rawItems: any[]): NormalizedPlanItem[] {
-  if (!Array.isArray(rawItems) || rawItems.length === 0) {
+function normalizePlanItems(rawInput: any): NormalizedPlanItem[] {
+  let rawItems: any[] = []
+
+  if (Array.isArray(rawInput)) {
+    rawItems = rawInput
+  } else if (rawInput && typeof rawInput === 'object') {
+    if (Array.isArray(rawInput.plan)) rawItems = rawInput.plan
+    else if (Array.isArray(rawInput.revision_plan)) rawItems = rawInput.revision_plan
+    else if (Array.isArray(rawInput.items)) rawItems = rawInput.items
+    else if (Array.isArray(rawInput.plan_data)) rawItems = rawInput.plan_data
+    else if (Array.isArray(rawInput.topics)) rawItems = rawInput.topics
+  }
+
+  if (rawItems.length === 0) {
     return [
       {
         topic_name: 'Virtual Memory & TLB Address Translation',
@@ -57,19 +69,70 @@ function normalizePlanItems(rawItems: any[]): NormalizedPlanItem[] {
     ]
   }
 
-  return rawItems.map((item, idx) => ({
-    topic_name: String(item.topic_name || item.name || `Topic ${idx + 1}`),
-    priority: ['high', 'medium', 'low'].includes(item.priority) ? item.priority : 'medium',
-    estimated_hours: typeof item.estimated_hours === 'number' ? item.estimated_hours : 2,
-    activities: Array.isArray(item.activities) && item.activities.length > 0
-      ? item.activities.map(String)
-      : ['Review core lecture notes and key formulas', 'Practice relevant past exam problems'],
-    resources: Array.isArray(item.resources) && item.resources.length > 0
-      ? item.resources.map(String)
-      : ['Course Materials & Syllabus'],
-    completed: Boolean(item.completed),
-    strength: ['weak', 'medium', 'strong'].includes(item.strength) ? item.strength : 'medium',
-  }))
+  return rawItems.map((item, idx) => {
+    const rawPriority = String(item?.priority || '').toLowerCase()
+    const rawStrength = String(item?.strength || '').toLowerCase()
+
+    const strength: 'weak' | 'medium' | 'strong' = ['weak', 'medium', 'strong'].includes(rawStrength)
+      ? (rawStrength as 'weak' | 'medium' | 'strong')
+      : rawPriority === 'high'
+      ? 'weak'
+      : rawPriority === 'low'
+      ? 'strong'
+      : 'medium'
+
+    const priority: 'high' | 'medium' | 'low' = ['high', 'medium', 'low'].includes(rawPriority)
+      ? (rawPriority as 'high' | 'medium' | 'low')
+      : strength === 'weak'
+      ? 'high'
+      : strength === 'strong'
+      ? 'low'
+      : 'medium'
+
+    const defaultHours = priority === 'high' ? 4 : priority === 'medium' ? 2.5 : 1.5
+    const estimated_hours =
+      typeof item?.estimated_hours === 'number' && item.estimated_hours > 0
+        ? item.estimated_hours
+        : defaultHours
+
+    // Map activities from activities, suggestions, or reason
+    let activities: string[] = []
+    if (Array.isArray(item?.activities) && item.activities.length > 0) {
+      activities = item.activities.map(String)
+    } else if (Array.isArray(item?.suggestions) && item.suggestions.length > 0) {
+      activities = item.suggestions.map(String)
+    } else if (item?.reason) {
+      activities = [
+        `Remediate conceptual gap: ${String(item.reason)}`,
+        'Solve targeted practice exercises and verify answers',
+      ]
+    } else {
+      activities = [
+        'Review core lecture notes and key formulas',
+        'Practice relevant past exam problems',
+      ]
+    }
+
+    // Map resources
+    let resources: string[] = []
+    if (Array.isArray(item?.resources) && item.resources.length > 0) {
+      resources = item.resources.map(String)
+    } else if (item?.reason && !activities.includes(String(item.reason))) {
+      resources = [String(item.reason)]
+    } else {
+      resources = ['Course Materials & Lecture Notes']
+    }
+
+    return {
+      topic_name: String(item?.topic_name || item?.name || `Topic ${idx + 1}`),
+      priority,
+      estimated_hours,
+      activities,
+      resources,
+      completed: Boolean(item?.completed),
+      strength,
+    }
+  })
 }
 
 export async function POST(request: Request) {
@@ -159,8 +222,14 @@ export async function POST(request: Request) {
     }
 
     // Generate revision plan with AI (with built-in fallback)
-    const rawPlanItems = await generateRevisionPlan(gapData, availableHours, allTopics)
-    const planItems = normalizePlanItems(rawPlanItems)
+    let rawPlanItems: any = null
+    try {
+      rawPlanItems = await generateRevisionPlan(gapData, availableHours, allTopics)
+    } catch (genErr) {
+      console.warn('Gemini revision plan generation error, falling back to structured topics:', genErr)
+      rawPlanItems = gapData
+    }
+    const planItems = normalizePlanItems(rawPlanItems && Array.isArray(rawPlanItems) && rawPlanItems.length > 0 ? rawPlanItems : gapData)
 
     // Save plan to Supabase
     const { data: plan, error } = await supabase
