@@ -1,0 +1,131 @@
+'use client'
+
+import { usePathname, useRouter } from 'next/navigation'
+import Link from 'next/link'
+import { useState, useEffect } from 'react'
+import { createClient } from '@/lib/supabase/client'
+import {
+  LuLayoutDashboard,
+  LuUpload,
+  LuMap,
+  LuBrain,
+  LuChartBar,
+  LuCalendarCheck,
+  LuMessageCircle,
+  LuTrendingUp,
+  LuLogOut,
+  LuMenu,
+  LuX,
+  LuSparkles,
+} from 'react-icons/lu'
+
+const navItems = [
+  { href: '/dashboard', label: 'Dashboard', icon: LuLayoutDashboard },
+  { href: '/materials', label: 'Materials', icon: LuUpload },
+  { href: '/topics', label: 'Topic Map', icon: LuMap },
+  { href: '/quiz', label: 'Diagnostic Quiz', icon: LuBrain },
+  { href: '/gap-report', label: 'Gap Report', icon: LuChartBar },
+  { href: '/revision-plan', label: 'Revision Plan', icon: LuCalendarCheck },
+  { href: '/assistant', label: 'AI Assistant', icon: LuMessageCircle },
+  { href: '/progress', label: 'Progress', icon: LuTrendingUp },
+]
+
+export default function Sidebar() {
+  const pathname = usePathname()
+  const router = useRouter()
+  const [isOpen, setIsOpen] = useState(false)
+  const [userName, setUserName] = useState('')
+
+  useEffect(() => {
+    const supabase = createClient()
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user) {
+        setUserName(user.user_metadata?.full_name || user.email?.split('@')[0] || 'Student')
+      }
+    })
+  }, [])
+
+  const handleLogout = async () => {
+    const supabase = createClient()
+    await supabase.auth.signOut()
+    router.push('/auth/login')
+  }
+
+  return (
+    <>
+      {/* Mobile toggle */}
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="fixed top-4 left-4 z-50 md:hidden btn-icon"
+        id="sidebar-toggle"
+      >
+        {isOpen ? <LuX size={20} /> : <LuMenu size={20} />}
+      </button>
+
+      {/* Overlay for mobile */}
+      {isOpen && (
+        <div
+          className="fixed inset-0 bg-black/50 z-30 md:hidden"
+          onClick={() => setIsOpen(false)}
+        />
+      )}
+
+      {/* Sidebar */}
+      <aside className={`sidebar ${isOpen ? 'open' : ''}`}>
+        <div className="flex flex-col h-full p-4">
+          {/* Logo */}
+          <div className="flex items-center gap-3 mb-8 px-2 pt-2">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center"
+              style={{ background: 'var(--gradient-primary)' }}>
+              <LuSparkles size={20} className="text-white" />
+            </div>
+            <div>
+              <h1 className="text-lg font-bold gradient-text">GapFinder</h1>
+              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>AI Study Assistant</p>
+            </div>
+          </div>
+
+          {/* Navigation */}
+          <nav className="flex-1 space-y-1">
+            {navItems.map((item) => {
+              const isActive = pathname === item.href || pathname.startsWith(item.href + '/')
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`sidebar-link ${isActive ? 'active' : ''}`}
+                  onClick={() => setIsOpen(false)}
+                >
+                  <item.icon size={18} />
+                  <span>{item.label}</span>
+                </Link>
+              )
+            })}
+          </nav>
+
+          {/* User section */}
+          <div className="border-t pt-4 mt-4" style={{ borderColor: 'var(--border-glass)' }}>
+            <div className="flex items-center gap-3 px-2 mb-3">
+              <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold"
+                style={{ background: 'var(--gradient-secondary)', color: 'white' }}>
+                {userName.charAt(0).toUpperCase()}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium truncate">{userName}</p>
+              </div>
+            </div>
+            <button
+              onClick={handleLogout}
+              className="sidebar-link w-full text-left"
+              style={{ color: 'var(--accent-danger)' }}
+              id="logout-button"
+            >
+              <LuLogOut size={18} />
+              <span>Log Out</span>
+            </button>
+          </div>
+        </div>
+      </aside>
+    </>
+  )
+}
