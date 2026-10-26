@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { LuSparkles, LuMail, LuLock, LuEye, LuEyeOff, LuLoader, LuCircleCheck, LuTriangleAlert } from 'react-icons/lu'
+import { FcGoogle } from 'react-icons/fc'
 
 function LoginForm() {
   const router = useRouter()
@@ -25,6 +26,7 @@ function LoginForm() {
   )
   const [loading, setLoading] = useState(false)
   const [demoLoading, setDemoLoading] = useState(false)
+  const [googleLoading, setGoogleLoading] = useState(false)
 
   const formatAuthError = (err: any): string => {
     if (!err) return 'An error occurred during sign in. Please try again.'
@@ -92,6 +94,30 @@ function LoginForm() {
     }
   }
 
+  const handleGoogleSignIn = async () => {
+    setError('')
+    setGoogleLoading(true)
+
+    try {
+      const supabase = createClient()
+      const { error: authError } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}/auth/callback?next=/dashboard`,
+        },
+      })
+
+      if (authError) {
+        setError(formatAuthError(authError))
+        setGoogleLoading(false)
+      }
+    } catch (err: any) {
+      console.error('Google sign in exception:', err)
+      setError(formatAuthError(err))
+      setGoogleLoading(false)
+    }
+  }
+
   const handleDemoLogin = async () => {
     setError('')
     setEmail('demo@gapfinder.ai')
@@ -140,6 +166,32 @@ function LoginForm() {
         </div>
       )}
 
+      {/* Google OAuth Button */}
+      <button
+        type="button"
+        onClick={handleGoogleSignIn}
+        className="btn-secondary w-full flex items-center justify-center gap-3 py-3 font-medium transition-all duration-200 mb-6"
+        style={{
+          background: 'rgba(255, 255, 255, 0.05)',
+          border: '1px solid var(--border-glass)',
+        }}
+        disabled={loading || demoLoading || googleLoading}
+        id="google-login-btn"
+      >
+        {googleLoading ? (
+          <LuLoader className="animate-spin" size={18} />
+        ) : (
+          <FcGoogle size={20} />
+        )}
+        <span>{googleLoading ? 'Connecting to Google...' : 'Continue with Google'}</span>
+      </button>
+
+      <div className="mb-6 flex items-center gap-4">
+        <div className="flex-1 h-px" style={{ background: 'var(--border-glass)' }} />
+        <span className="text-xs uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>OR SIGN IN WITH EMAIL</span>
+        <div className="flex-1 h-px" style={{ background: 'var(--border-glass)' }} />
+      </div>
+
       <form onSubmit={handleLogin} className="space-y-5">
         <div>
           <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>
@@ -160,7 +212,7 @@ function LoginForm() {
               required
               id="login-email"
               autoComplete="email"
-              disabled={loading || demoLoading}
+              disabled={loading || demoLoading || googleLoading}
             />
           </div>
         </div>
@@ -184,7 +236,7 @@ function LoginForm() {
               required
               id="login-password"
               autoComplete="current-password"
-              disabled={loading || demoLoading}
+              disabled={loading || demoLoading || googleLoading}
             />
             <button
               type="button"
@@ -216,7 +268,7 @@ function LoginForm() {
         <button
           type="submit"
           className="btn-primary w-full flex items-center justify-center gap-2"
-          disabled={loading || demoLoading}
+          disabled={loading || demoLoading || googleLoading}
           id="login-submit"
         >
           {loading ? <LuLoader className="animate-spin" size={18} /> : null}
@@ -226,7 +278,7 @@ function LoginForm() {
 
       <div className="my-6 flex items-center gap-4">
         <div className="flex-1 h-px" style={{ background: 'var(--border-glass)' }} />
-        <span className="text-xs" style={{ color: 'var(--text-muted)' }}>OR</span>
+        <span className="text-xs uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>OR EVALUATE DEMO</span>
         <div className="flex-1 h-px" style={{ background: 'var(--border-glass)' }} />
       </div>
 
@@ -234,11 +286,11 @@ function LoginForm() {
         type="button"
         onClick={handleDemoLogin}
         className="btn-secondary w-full flex items-center justify-center gap-2"
-        disabled={loading || demoLoading}
+        disabled={loading || demoLoading || googleLoading}
         id="demo-login-btn"
       >
         {demoLoading ? <LuLoader className="animate-spin" size={16} /> : <LuSparkles size={16} />}
-        {demoLoading ? 'Loading Demo Workspace...' : 'Try Demo Account'}
+        {demoLoading ? 'Loading Demo Workspace...' : 'Try Demo Account (Judge Mode)'}
       </button>
 
       <p className="text-center mt-6 text-sm" style={{ color: 'var(--text-secondary)' }}>

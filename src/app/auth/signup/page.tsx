@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { LuSparkles, LuMail, LuLock, LuEye, LuEyeOff, LuUser, LuLoader, LuCircleCheck, LuTriangleAlert, LuArrowRight } from 'react-icons/lu'
+import { FcGoogle } from 'react-icons/fc'
 
 export default function SignUpPage() {
   const router = useRouter()
@@ -16,6 +17,7 @@ export default function SignUpPage() {
   const [success, setSuccess] = useState('')
   const [loading, setLoading] = useState(false)
   const [demoLoading, setDemoLoading] = useState(false)
+  const [googleLoading, setGoogleLoading] = useState(false)
 
   const formatSignUpError = (err: any): string => {
     if (!err) return 'An error occurred during account creation. Please try again.'
@@ -28,7 +30,7 @@ export default function SignUpPage() {
     if (code === 'email_address_invalid' || msg.includes('email address') || msg.includes('invalid')) {
       return 'Please enter a valid email address (temporary and disposable domains are restricted).'
     }
-    if (code === 'weak_password' || msg.includes('password') && msg.includes('short')) {
+    if (code === 'weak_password' || (msg.includes('password') && msg.includes('short'))) {
       return 'Password should be at least 6 characters long.'
     }
     if (code === 'over_email_send_rate_limit' || msg.includes('rate limit') || msg.includes('429')) {
@@ -95,6 +97,30 @@ export default function SignUpPage() {
       setError(formatSignUpError(err))
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleGoogleSignUp = async () => {
+    setError('')
+    setGoogleLoading(true)
+
+    try {
+      const supabase = createClient()
+      const { error: authError } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}/auth/callback?next=/dashboard`,
+        },
+      })
+
+      if (authError) {
+        setError(formatSignUpError(authError))
+        setGoogleLoading(false)
+      }
+    } catch (err: any) {
+      console.error('Google sign up exception:', err)
+      setError(formatSignUpError(err))
+      setGoogleLoading(false)
     }
   }
 
@@ -175,119 +201,147 @@ export default function SignUpPage() {
               </Link>
             </div>
           ) : (
-            <form onSubmit={handleSignUp} className="space-y-5">
-              <div>
-                <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>
-                  Full Name
-                </label>
-                <div className="relative flex items-center">
-                  <LuUser className="absolute left-4 pointer-events-none z-10" style={{ color: 'var(--text-muted)' }} size={18} />
-                  <input
-                    type="text"
-                    className="input-glass pl-12"
-                    style={{ paddingLeft: '3rem' }}
-                    placeholder="Alex Morgan"
-                    value={fullName}
-                    onChange={(e) => {
-                      setFullName(e.target.value)
-                      if (error) setError('')
-                    }}
-                    required
-                    id="signup-name"
-                    autoComplete="name"
-                    disabled={loading || demoLoading}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>
-                  Email
-                </label>
-                <div className="relative flex items-center">
-                  <LuMail className="absolute left-4 pointer-events-none z-10" style={{ color: 'var(--text-muted)' }} size={18} />
-                  <input
-                    type="email"
-                    className="input-glass pl-12"
-                    style={{ paddingLeft: '3rem' }}
-                    placeholder="alex@university.edu"
-                    value={email}
-                    onChange={(e) => {
-                      setEmail(e.target.value)
-                      if (error) setError('')
-                    }}
-                    required
-                    id="signup-email"
-                    autoComplete="email"
-                    disabled={loading || demoLoading}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>
-                  Password
-                </label>
-                <div className="relative flex items-center">
-                  <LuLock className="absolute left-4 pointer-events-none z-10" style={{ color: 'var(--text-muted)' }} size={18} />
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    className="input-glass pl-12 pr-12"
-                    style={{ paddingLeft: '3rem', paddingRight: '3rem' }}
-                    placeholder="Min. 6 characters"
-                    value={password}
-                    onChange={(e) => {
-                      setPassword(e.target.value)
-                      if (error) setError('')
-                    }}
-                    required
-                    minLength={6}
-                    id="signup-password"
-                    autoComplete="new-password"
-                    disabled={loading || demoLoading}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-4 z-10 p-1"
-                    style={{ color: 'var(--text-muted)' }}
-                    aria-label="Toggle password visibility"
-                    tabIndex={-1}
-                  >
-                    {showPassword ? <LuEyeOff size={18} /> : <LuEye size={18} />}
-                  </button>
-                </div>
-              </div>
-
-              {error && (
-                <div
-                  className="p-3 rounded-lg text-sm flex items-start gap-2"
-                  style={{
-                    background: 'rgba(248, 113, 113, 0.1)',
-                    color: 'var(--accent-danger)',
-                    border: '1px solid rgba(248, 113, 113, 0.3)',
-                  }}
-                >
-                  <LuTriangleAlert size={16} className="shrink-0 mt-0.5" />
-                  <span>{error}</span>
-                </div>
-              )}
-
+            <>
+              {/* Google OAuth Button */}
               <button
-                type="submit"
-                className="btn-primary w-full flex items-center justify-center gap-2"
-                disabled={loading || demoLoading}
-                id="signup-submit"
+                type="button"
+                onClick={handleGoogleSignUp}
+                className="btn-secondary w-full flex items-center justify-center gap-3 py-3 font-medium transition-all duration-200 mb-6"
+                style={{
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  border: '1px solid var(--border-glass)',
+                }}
+                disabled={loading || demoLoading || googleLoading}
+                id="google-signup-btn"
               >
-                {loading ? <LuLoader className="animate-spin" size={18} /> : null}
-                {loading ? 'Creating account...' : 'Create Account'}
+                {googleLoading ? (
+                  <LuLoader className="animate-spin" size={18} />
+                ) : (
+                  <FcGoogle size={20} />
+                )}
+                <span>{googleLoading ? 'Connecting to Google...' : 'Sign up with Google'}</span>
               </button>
-            </form>
+
+              <div className="mb-6 flex items-center gap-4">
+                <div className="flex-1 h-px" style={{ background: 'var(--border-glass)' }} />
+                <span className="text-xs uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>OR SIGN UP WITH EMAIL</span>
+                <div className="flex-1 h-px" style={{ background: 'var(--border-glass)' }} />
+              </div>
+
+              <form onSubmit={handleSignUp} className="space-y-5">
+                <div>
+                  <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>
+                    Full Name
+                  </label>
+                  <div className="relative flex items-center">
+                    <LuUser className="absolute left-4 pointer-events-none z-10" style={{ color: 'var(--text-muted)' }} size={18} />
+                    <input
+                      type="text"
+                      className="input-glass pl-12"
+                      style={{ paddingLeft: '3rem' }}
+                      placeholder="Alex Morgan"
+                      value={fullName}
+                      onChange={(e) => {
+                        setFullName(e.target.value)
+                        if (error) setError('')
+                      }}
+                      required
+                      id="signup-name"
+                      autoComplete="name"
+                      disabled={loading || demoLoading || googleLoading}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>
+                    Email
+                  </label>
+                  <div className="relative flex items-center">
+                    <LuMail className="absolute left-4 pointer-events-none z-10" style={{ color: 'var(--text-muted)' }} size={18} />
+                    <input
+                      type="email"
+                      className="input-glass pl-12"
+                      style={{ paddingLeft: '3rem' }}
+                      placeholder="alex@university.edu"
+                      value={email}
+                      onChange={(e) => {
+                        setEmail(e.target.value)
+                        if (error) setError('')
+                      }}
+                      required
+                      id="signup-email"
+                      autoComplete="email"
+                      disabled={loading || demoLoading || googleLoading}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>
+                    Password
+                  </label>
+                  <div className="relative flex items-center">
+                    <LuLock className="absolute left-4 pointer-events-none z-10" style={{ color: 'var(--text-muted)' }} size={18} />
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      className="input-glass pl-12 pr-12"
+                      style={{ paddingLeft: '3rem', paddingRight: '3rem' }}
+                      placeholder="Min. 6 characters"
+                      value={password}
+                      onChange={(e) => {
+                        setPassword(e.target.value)
+                        if (error) setError('')
+                      }}
+                      required
+                      minLength={6}
+                      id="signup-password"
+                      autoComplete="new-password"
+                      disabled={loading || demoLoading || googleLoading}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-4 z-10 p-1"
+                      style={{ color: 'var(--text-muted)' }}
+                      aria-label="Toggle password visibility"
+                      tabIndex={-1}
+                    >
+                      {showPassword ? <LuEyeOff size={18} /> : <LuEye size={18} />}
+                    </button>
+                  </div>
+                </div>
+
+                {error && (
+                  <div
+                    className="p-3 rounded-lg text-sm flex items-start gap-2"
+                    style={{
+                      background: 'rgba(248, 113, 113, 0.1)',
+                      color: 'var(--accent-danger)',
+                      border: '1px solid rgba(248, 113, 113, 0.3)',
+                    }}
+                  >
+                    <LuTriangleAlert size={16} className="shrink-0 mt-0.5" />
+                    <span>{error}</span>
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  className="btn-primary w-full flex items-center justify-center gap-2"
+                  disabled={loading || demoLoading || googleLoading}
+                  id="signup-submit"
+                >
+                  {loading ? <LuLoader className="animate-spin" size={18} /> : null}
+                  {loading ? 'Creating account...' : 'Create Account'}
+                </button>
+              </form>
+            </>
           )}
 
           <div className="my-6 flex items-center gap-4">
             <div className="flex-1 h-px" style={{ background: 'var(--border-glass)' }} />
-            <span className="text-xs" style={{ color: 'var(--text-muted)' }}>OR</span>
+            <span className="text-xs uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>OR EVALUATE DEMO</span>
             <div className="flex-1 h-px" style={{ background: 'var(--border-glass)' }} />
           </div>
 
@@ -295,7 +349,7 @@ export default function SignUpPage() {
             type="button"
             onClick={handleDemoLogin}
             className="btn-secondary w-full flex items-center justify-center gap-2"
-            disabled={loading || demoLoading}
+            disabled={loading || demoLoading || googleLoading}
             id="signup-demo-login-btn"
           >
             {demoLoading ? <LuLoader className="animate-spin" size={16} /> : <LuSparkles size={16} />}
