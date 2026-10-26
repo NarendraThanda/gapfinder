@@ -1,7 +1,7 @@
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
-import { generateQuestions } from '@/lib/rag'
-import { generateEmbedding } from '@/lib/gemini'
+import { generateQuestions, validateAndCleanQuestions } from '@/lib/rag'
+import { generateEmbedding, cleanOptionText } from '@/lib/gemini'
 
 export const maxDuration = 60
 
@@ -89,7 +89,8 @@ export async function POST(request: Request) {
       }
 
       try {
-        const questions = await generateQuestions(context, topic.name, questionsPerTopic, difficulty)
+        const rawQuestions = await generateQuestions(context, topic.name, questionsPerTopic, difficulty)
+        const questions = validateAndCleanQuestions(rawQuestions, topic.name, questionsPerTopic, difficulty)
 
         for (const q of questions) {
           await supabase.from('quiz_questions').insert({
@@ -118,16 +119,23 @@ export async function POST(request: Request) {
       .update({ total_questions: questionIndex })
       .eq('id', quiz.id)
 
-    // Fetch all questions
+    // Fetch all questions and defensively sanitize options
     const { data: allQuestions } = await supabase
       .from('quiz_questions')
       .select('*')
       .eq('quiz_id', quiz.id)
       .order('order_index', { ascending: true })
 
+    const sanitizedQuestions = (allQuestions || []).map((q: any) => ({
+      ...q,
+      options: Array.isArray(q.options)
+        ? q.options.map((opt: any) => cleanOptionText(opt))
+        : [],
+    }))
+
     return NextResponse.json({
       quiz: { ...quiz, total_questions: questionIndex, material_id: resolvedMaterialId },
-      questions: allQuestions || [],
+      questions: sanitizedQuestions,
     })
   } catch (error) {
     console.error('Quiz generation error:', error)
@@ -162,13 +170,20 @@ export async function GET(request: Request) {
         .eq('quiz_id', quizId)
         .order('order_index', { ascending: true })
 
+      const sanitizedQuestions = (questions || []).map((q: any) => ({
+        ...q,
+        options: Array.isArray(q.options)
+          ? q.options.map((opt: any) => cleanOptionText(opt))
+          : [],
+      }))
+
       const { data: answers } = await supabase
         .from('quiz_answers')
         .select('*')
         .eq('quiz_id', quizId)
         .eq('user_id', user.id)
 
-      return NextResponse.json({ quiz, questions: questions || [], answers: answers || [] })
+      return NextResponse.json({ quiz, questions: sanitizedQuestions, answers: answers || [] })
     }
 
     let query = supabase

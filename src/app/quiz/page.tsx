@@ -44,6 +44,19 @@ interface QuizSession {
 
 import MaterialContextSelector, { MaterialOption } from '@/components/MaterialContextSelector'
 
+function formatOptionDisplay(opt: any): string {
+  if (typeof opt !== 'string') return String(opt || '')
+  let cleaned = opt.trim()
+  // Strip leading letter or number prefixes like "A)", "B.", "(C)", "D - ", "1. ", etc.
+  cleaned = cleaned.replace(/^(\([A-Da-d\d]\)|[A-Da-d\d][\.\)\:\-]|[A-Da-d]\s+)\s*/, '').trim()
+  // Strip surrounding quotes
+  cleaned = cleaned.replace(/^["'`]|["'`]$/g, '').trim()
+  if (cleaned.length === 0) {
+    return 'Option text unavailable'
+  }
+  return cleaned
+}
+
 export default function DiagnosticQuizPage() {
   return (
     <Suspense fallback={<div className="p-12 text-center text-sm text-gray-400">Loading diagnostic quiz...</div>}>
@@ -458,9 +471,10 @@ function DiagnosticQuizContent() {
 
               {/* Options */}
               <div className="space-y-3">
-                {currentQ.options.map((option, idx) => {
+                {(Array.isArray(currentQ.options) ? currentQ.options : []).map((rawOption, idx) => {
                   const isSelected = selectedOption === idx
                   const isCorrect = idx === currentQ.correct_answer
+                  const cleanOption = formatOptionDisplay(rawOption)
 
                   let optionStyle = 'border-white/10 bg-white/[0.02] text-gray-300 hover:border-purple-400/40'
 
@@ -482,11 +496,11 @@ function DiagnosticQuizContent() {
                       onClick={() => handleSelectOption(idx)}
                       className={`p-4 rounded-xl border cursor-pointer transition-all flex items-center justify-between gap-4 ${optionStyle}`}
                     >
-                      <div className="flex items-center gap-3">
-                        <span className="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold bg-white/5 border border-white/10 shrink-0">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <span className="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold bg-white/5 border border-white/10 shrink-0 text-purple-300">
                           {String.fromCharCode(65 + idx)}
                         </span>
-                        <span className="text-sm">{option}</span>
+                        <span className="text-sm leading-relaxed break-words">{cleanOption}</span>
                       </div>
 
                       {hasSubmittedAnswer && (

@@ -49,21 +49,78 @@ export async function generateText(prompt: string, systemInstruction?: string): 
   }
 }
 
+const SUSPICIOUS_SYMBOLS = new Set(['_', '\\', '|', '^', '~', '`', '[', ']', '{', '}', '@', '%', '$', '*', '+', '=', ';'])
+
+export function isCleanOptionText(str: string): boolean {
+  if (!str || typeof str !== 'string') return false
+  const t = str.trim()
+  if (t.length < 3 || t.length > 350) return false
+
+  // Reject internal PDF syntax leaks
+  if (/^%PDF-|\bobj\b|\/Type\s*\/|\/Catalog\b|\/StructTreeRoot\b|endobj/i.test(t)) return false
+
+  let letters = 0
+  let symbols = 0
+  for (let i = 0; i < t.length; i++) {
+    const ch = t[i]
+    if (/[a-zA-Z]/.test(ch)) letters++
+    else if (SUSPICIOUS_SYMBOLS.has(ch)) symbols++
+  }
+
+  // Must have reasonable letter density (at least 35% letters)
+  if (letters / t.length < 0.35) return false
+
+  // Reject high-entropy symbol soup (> 8% suspicious symbols)
+  if (symbols / t.length > 0.08) return false
+
+  // Check word fragmentation: reject text where > 30% of words are isolated single letters (font byte IDs)
+  const words = t.split(/\s+/).filter(Boolean)
+  if (words.length >= 4) {
+    const singleLetterWords = words.filter(w => w.length === 1 && !['a', 'i', 'A', 'I', '&'].includes(w))
+    if (singleLetterWords.length / words.length > 0.30) return false
+  }
+
+  return true
+}
+
+export function cleanOptionText(opt: any): string {
+  if (typeof opt !== 'string') return String(opt || '')
+  let cleaned = opt.trim()
+  // Strip leading numbering or letter indicators like "A)", "B.", "1.", "(C)", "D - "
+  cleaned = cleaned.replace(/^(\([A-Da-d\d]\)|[A-Da-d\d][\.\)\:\-]|[A-Da-d]\s+)\s*/, '').trim()
+  // Strip surrounding quotes
+  cleaned = cleaned.replace(/^["'`]|["'`]$/g, '').trim()
+  return cleaned
+}
+
 export async function generateJSON<T>(prompt: string, systemInstruction?: string): Promise<T> {
   if (genAI) {
-    try {
-      const model = genAI.getGenerativeModel({
-        model: 'gemini-2.0-flash',
-        systemInstruction: systemInstruction,
-        generationConfig: {
-          responseMimeType: 'application/json',
-        },
-      })
-      const result = await model.generateContent(prompt)
-      const text = result.response.text()
-      return JSON.parse(text) as T
-    } catch (err) {
-      console.warn('Gemini JSON generation failed or rate-limited, engaging intelligent fallback:', err)
+    // Attempt generation with retry
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const model = genAI.getGenerativeModel({
+          model: 'gemini-2.0-flash',
+          systemInstruction: systemInstruction,
+          generationConfig: {
+            responseMimeType: 'application/json',
+          },
+        })
+        const result = await model.generateContent(prompt)
+        let text = result.response.text().trim()
+
+        // Strip markdown code fences if present
+        if (text.startsWith('```')) {
+          text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim()
+        }
+
+        return JSON.parse(text) as T
+      } catch (err) {
+        if (attempt === 0) {
+          await new Promise(r => setTimeout(r, 400))
+        } else {
+          console.warn('Gemini JSON generation failed or rate-limited after retry, engaging intelligent fallback:', err)
+        }
+      }
     }
   }
 
@@ -95,39 +152,45 @@ function fallbackJSONGeneration<T>(prompt: string): T {
     const topicMatch = prompt.match(/"topic_name":\s*"([^"]+)"/i) || prompt.match(/TOPIC:\s*([^\n]+)/i)
     const topicName = topicMatch ? topicMatch[1].trim() : 'Core Concepts'
 
-    // Extract context lines
+    // Extract context lines and strictly validate natural language readability
     const context = extractSection('STUDY MATERIAL CONTEXT:')
-    const sentences = context.split(/[\.\n]/).map(s => s.trim()).filter(s => s.length > 25)
+    const rawSentences = context.split(/[\.\n]/).map(s => s.trim())
+    const cleanSentences = rawSentences.filter(s => s.length > 20 && isCleanOptionText(s))
 
-    const q1 = sentences[0] || `${topicName} covers core conceptual patterns and computational rules.`
-    const q2 = sentences[1] || `${topicName} requires verifying syntax specifications and system constraints.`
+    const cleanFact1 = cleanSentences[0]
+      ? cleanSentences[0].slice(0, 120).trim()
+      : `It establishes core operational specifications and structured workflows for ${topicName}.`
+
+    const cleanFact2 = cleanSentences[1]
+      ? cleanSentences[1].slice(0, 120).trim()
+      : `It enforces validated state boundaries and preserves data consistency across execution cycles.`
 
     return [
       {
         question: `Based on your material for ${topicName}, which of the following is accurate?`,
         options: [
-          q1.slice(0, 100),
-          `It operates without respecting the defined operational specifications of ${topicName}`,
-          `It is completely deprecated and removed in recent revisions`,
-          `It requires external intervention for every single execution cycle`,
+          cleanFact1,
+          `It operates without respecting the defined operational specifications of ${topicName}.`,
+          `It is completely deprecated and removed in recent revisions.`,
+          `It requires external manual intervention for every single execution cycle.`,
         ],
         correct_answer: 0,
-        explanation: `According to your study material: "${q1.slice(0, 150)}"`,
-        citation: `Section on ${topicName}: "${q1.slice(0, 120)}"`,
+        explanation: `According to your study material: "${cleanFact1}" represents the valid principle.`,
+        citation: `Section on ${topicName}: Key operational principles`,
         difficulty: 'medium',
         topic_name: topicName,
       },
       {
         question: `What primary mechanism is detailed in the material regarding ${topicName}?`,
         options: [
-          `Arbitrary and unconstrained memory execution`,
-          q2.slice(0, 100),
-          `Immediate abort on first execution cycle`,
-          `Manual register overrides exclusively`,
+          `Arbitrary and unconstrained execution without operational boundaries`,
+          cleanFact2,
+          `Immediate abort upon evaluating the first conditional execution cycle`,
+          `Manual register overrides exclusively at runtime`,
         ],
         correct_answer: 1,
-        explanation: `Your uploaded text states: "${q2.slice(0, 150)}"`,
-        citation: `Section on ${topicName}: "${q2.slice(0, 120)}"`,
+        explanation: `Your study material establishes: "${cleanFact2}".`,
+        citation: `Section on ${topicName}: Mechanism specifications`,
         difficulty: 'hard',
         topic_name: topicName,
       },
