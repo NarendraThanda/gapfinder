@@ -47,19 +47,19 @@ export default function LandingPage() {
     <div className="min-h-screen">
       {/* Header */}
       <header className="fixed top-0 left-0 right-0 z-50 glass-static" style={{ borderRadius: 0, borderTop: 'none', borderLeft: 'none', borderRight: 'none' }}>
-        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center"
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center shrink-0"
               style={{ background: 'var(--gradient-primary)' }}>
-              <LuSparkles size={20} className="text-white" />
+              <LuSparkles size={18} className="text-white" />
             </div>
-            <span className="text-xl font-bold gradient-text">GapFinder AI</span>
+            <span className="text-lg sm:text-xl font-bold gradient-text">GapFinder AI</span>
           </div>
-          <div className="flex items-center gap-3">
-            <Link href="/auth/login" className="btn-secondary" id="login-nav-btn">
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+            <Link href="/auth/login" className="btn-secondary text-xs sm:text-sm py-2 px-3 sm:px-5" id="login-nav-btn">
               Log In
             </Link>
-            <Link href="/auth/signup" className="btn-primary" id="signup-nav-btn">
+            <Link href="/auth/signup" className="btn-primary text-xs sm:text-sm py-2 px-3 sm:px-5" id="signup-nav-btn">
               Get Started
             </Link>
           </div>
@@ -67,33 +67,33 @@ export default function LandingPage() {
       </header>
 
       {/* Hero */}
-      <section className="pt-32 pb-20 px-6">
+      <section className="pt-28 sm:pt-36 pb-16 sm:pb-20 px-4 sm:px-6">
         <div className="max-w-4xl mx-auto text-center">
           <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full mb-6 animate-fadeIn"
             style={{ background: 'rgba(124, 92, 252, 0.1)', border: '1px solid rgba(124, 92, 252, 0.3)' }}>
             <LuSparkles size={14} style={{ color: 'var(--accent-primary)' }} />
-            <span className="text-sm font-medium" style={{ color: 'var(--accent-primary)' }}>
+            <span className="text-xs sm:text-sm font-medium" style={{ color: 'var(--accent-primary)' }}>
               AI-Powered Study Diagnosis
             </span>
           </div>
 
-          <h1 className="text-5xl md:text-7xl font-extrabold leading-tight mb-6 animate-fadeIn" style={{ animationDelay: '0.1s' }}>
+          <h1 className="text-4xl sm:text-5xl md:text-7xl font-extrabold leading-tight mb-6 animate-fadeIn" style={{ animationDelay: '0.1s' }}>
             Find What You{' '}
             <span className="gradient-text">Don&apos;t Know</span>
             <br />
             Before The Exam Finds It
           </h1>
 
-          <p className="text-lg md:text-xl max-w-2xl mx-auto mb-10 animate-fadeIn" style={{ color: 'var(--text-secondary)', animationDelay: '0.2s' }}>
+          <p className="text-base sm:text-lg md:text-xl max-w-2xl mx-auto mb-10 animate-fadeIn" style={{ color: 'var(--text-secondary)', animationDelay: '0.2s' }}>
             Upload your study materials. Take a diagnostic quiz. Get a clear picture of your weak areas and a personalized revision plan — all powered by AI grounded in YOUR content.
           </p>
 
-          <div className="flex items-center justify-center gap-4 animate-fadeIn" style={{ animationDelay: '0.3s' }}>
-            <Link href="/auth/signup" className="btn-primary text-lg px-8 py-4 flex items-center gap-2" id="hero-cta">
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4 animate-fadeIn" style={{ animationDelay: '0.3s' }}>
+            <Link href="/auth/signup" className="btn-primary text-base sm:text-lg px-6 sm:px-8 py-3.5 sm:py-4 flex items-center justify-center gap-2 w-full sm:w-auto" id="hero-cta">
               Start Finding Your Gaps
               <LuArrowRight size={20} />
             </Link>
-            <Link href="#features" className="btn-secondary text-lg px-8 py-4" id="learn-more-btn">
+            <Link href="#features" className="btn-secondary text-base sm:text-lg px-6 sm:px-8 py-3.5 sm:py-4 w-full sm:w-auto text-center" id="learn-more-btn">
               Learn More
             </Link>
           </div>

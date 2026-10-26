@@ -164,7 +164,7 @@ function GapReportContent() {
 
         {/* Filter Pills and Summary Count */}
         <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {[
               { id: 'all', label: `All Topics (${reports.length})` },
               { id: 'weak', label: `Weak Gaps (${weakCount})`, color: 'text-red-400' },
@@ -229,11 +229,11 @@ function GapReportContent() {
               >
                 {/* Header row */}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-3">
-                      <h3 className="text-lg font-bold text-white">{report.topic_name}</h3>
+                  <div className="space-y-1 min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                      <h3 className="text-base sm:text-lg font-bold text-white break-words">{report.topic_name}</h3>
                       {report.strength === 'weak' && (
-                        <span className="badge badge-weak flex items-center gap-1">
+                        <span className="badge badge-weak flex items-center gap-1 shrink-0">
                           <LuTriangleAlert size={12} />
                           <span>Critical Gap</span>
                         </span>

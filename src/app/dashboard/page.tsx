@@ -158,78 +158,78 @@ export default function DashboardPage() {
         </div>
 
         {/* Stat Cards Grid */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
-          <div className="glass p-5 flex flex-col justify-between">
-            <div className="flex items-center justify-between">
-              <span className="text-xs uppercase tracking-wider font-semibold text-red-400">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 md:gap-6">
+          <div className="glass p-4 sm:p-5 flex flex-col justify-between">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] sm:text-xs uppercase tracking-wider font-semibold text-red-400 truncate">
                 Weak Topics
               </span>
-              <span className="p-2 rounded-lg bg-red-500/10 text-red-400">
-                <LuTriangleAlert size={18} />
+              <span className="p-1.5 sm:p-2 rounded-lg bg-red-500/10 text-red-400 shrink-0">
+                <LuTriangleAlert size={16} />
               </span>
             </div>
-            <div className="mt-4">
-              <span className="text-3xl font-extrabold text-red-400">
+            <div className="mt-3 sm:mt-4">
+              <span className="text-2xl sm:text-3xl font-extrabold text-red-400">
                 {stats?.weakTopics ?? 0}
               </span>
-              <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+              <p className="text-[11px] sm:text-xs mt-1 truncate" style={{ color: 'var(--text-muted)' }}>
                 Requires urgent revision
               </p>
             </div>
           </div>
 
-          <div className="glass p-5 flex flex-col justify-between">
-            <div className="flex items-center justify-between">
-              <span className="text-xs uppercase tracking-wider font-semibold text-amber-400">
+          <div className="glass p-4 sm:p-5 flex flex-col justify-between">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] sm:text-xs uppercase tracking-wider font-semibold text-amber-400 truncate">
                 Medium Topics
               </span>
-              <span className="p-2 rounded-lg bg-amber-500/10 text-amber-400">
-                <LuRefreshCw size={18} />
+              <span className="p-1.5 sm:p-2 rounded-lg bg-amber-500/10 text-amber-400 shrink-0">
+                <LuRefreshCw size={16} />
               </span>
             </div>
-            <div className="mt-4">
-              <span className="text-3xl font-extrabold text-amber-400">
+            <div className="mt-3 sm:mt-4">
+              <span className="text-2xl sm:text-3xl font-extrabold text-amber-400">
                 {stats?.mediumTopics ?? 0}
               </span>
-              <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+              <p className="text-[11px] sm:text-xs mt-1 truncate" style={{ color: 'var(--text-muted)' }}>
                 Partial conceptual grasp
               </p>
             </div>
           </div>
 
-          <div className="glass p-5 flex flex-col justify-between">
-            <div className="flex items-center justify-between">
-              <span className="text-xs uppercase tracking-wider font-semibold text-emerald-400">
+          <div className="glass p-4 sm:p-5 flex flex-col justify-between">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] sm:text-xs uppercase tracking-wider font-semibold text-emerald-400 truncate">
                 Mastered Topics
               </span>
-              <span className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400">
-                <LuCircleCheck size={18} />
+              <span className="p-1.5 sm:p-2 rounded-lg bg-emerald-500/10 text-emerald-400 shrink-0">
+                <LuCircleCheck size={16} />
               </span>
             </div>
-            <div className="mt-4">
-              <span className="text-3xl font-extrabold text-emerald-400">
+            <div className="mt-3 sm:mt-4">
+              <span className="text-2xl sm:text-3xl font-extrabold text-emerald-400">
                 {stats?.strongTopics ?? 0}
               </span>
-              <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+              <p className="text-[11px] sm:text-xs mt-1 truncate" style={{ color: 'var(--text-muted)' }}>
                 Solid foundation (&gt;70%)
               </p>
             </div>
           </div>
 
-          <div className="glass p-5 flex flex-col justify-between">
-            <div className="flex items-center justify-between">
-              <span className="text-xs uppercase tracking-wider font-semibold text-cyan-400">
+          <div className="glass p-4 sm:p-5 flex flex-col justify-between">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] sm:text-xs uppercase tracking-wider font-semibold text-cyan-400 truncate">
                 Overall Accuracy
               </span>
-              <span className="p-2 rounded-lg bg-cyan-500/10 text-cyan-400">
-                <LuAward size={18} />
+              <span className="p-1.5 sm:p-2 rounded-lg bg-cyan-500/10 text-cyan-400 shrink-0">
+                <LuAward size={16} />
               </span>
             </div>
-            <div className="mt-4">
-              <span className="text-3xl font-extrabold text-cyan-400">
+            <div className="mt-3 sm:mt-4">
+              <span className="text-2xl sm:text-3xl font-extrabold text-cyan-400">
                 {stats?.overallAccuracy ?? 0}%
               </span>
-              <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+              <p className="text-[11px] sm:text-xs mt-1 truncate" style={{ color: 'var(--text-muted)' }}>
                 Across {stats?.completedQuizzes ?? 0} quiz assessments
               </p>
             </div>

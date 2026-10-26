@@ -135,7 +135,7 @@ function AssistantContent() {
       headerTitle="Explain-This-Topic Assistant"
       headerSubtitle="Grounded AI tutor answering strictly from your uploaded course notes with source citations"
     >
-      <div className="max-w-4xl mx-auto flex flex-col h-[calc(100vh-210px)] min-h-[500px]">
+      <div className="max-w-4xl mx-auto flex-1 flex flex-col h-[calc(100dvh-270px)] min-h-[380px]">
         {/* RAG Verification Disclaimer */}
         <div className="glass p-3 mb-4 rounded-xl flex items-center justify-between text-xs border-l-4 border-l-cyan-400">
           <div className="flex items-center gap-2" style={{ color: 'var(--text-secondary)' }}>
@@ -246,7 +246,8 @@ function AssistantContent() {
         >
           <input
             type="text"
-            className="input-glass pr-12 text-sm py-3.5"
+            className="input-glass pl-4 pr-14 text-sm py-3.5"
+            style={{ paddingRight: '3.5rem' }}
             placeholder="Ask anything about your syllabus, lecture notes, or past papers..."
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -256,8 +257,9 @@ function AssistantContent() {
           <button
             type="submit"
             disabled={loading || !input.trim()}
-            className="absolute right-3 p-2 rounded-xl bg-purple-600 text-white disabled:opacity-40 hover:bg-purple-500 transition-colors"
+            className="absolute right-3 p-2 rounded-xl bg-purple-600 text-white disabled:opacity-40 hover:bg-purple-500 transition-colors z-10"
             id="chat-send-btn"
+            aria-label="Send message"
           >
             <LuSend size={16} />
           </button>
