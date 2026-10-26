@@ -33,19 +33,48 @@ interface ParentTopic {
   subtopics: SubTopic[]
 }
 
+import MaterialContextSelector, { MaterialOption } from '@/components/MaterialContextSelector'
+
 export default function TopicMapPage() {
   const [topics, setTopics] = useState<ParentTopic[]>([])
+  const [materials, setMaterials] = useState<MaterialOption[]>([])
+  const [activeMaterialId, setActiveMaterialId] = useState<string | null>(null)
+  const [activeMaterialTitle, setActiveMaterialTitle] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [expandedTopics, setExpandedTopics] = useState<Record<string, boolean>>({})
 
-  const fetchTopics = async () => {
+  const fetchTopicsAndMaterials = async (targetId?: string | null) => {
     try {
       setLoading(true)
-      const res = await fetch('/api/topics')
-      if (res.ok) {
-        const data = await res.json()
+      const storedId = typeof window !== 'undefined' ? localStorage.getItem('gapfinder_active_material_id') : null
+      const effectiveId = targetId !== undefined ? targetId : (activeMaterialId || storedId)
+
+      // Fetch materials list first or concurrently
+      const [matRes, topicsRes] = await Promise.all([
+        fetch('/api/materials'),
+        fetch(`/api/topics${effectiveId ? `?materialId=${encodeURIComponent(effectiveId)}` : ''}`),
+      ])
+
+      let matList: MaterialOption[] = []
+      if (matRes.ok) {
+        const matData = await matRes.json()
+        matList = matData.materials || []
+        setMaterials(matList)
+      }
+
+      if (topicsRes.ok) {
+        const data = await topicsRes.json()
         setTopics(data.topics || [])
-        // Expand all by default
+        const currentMatId = data.activeMaterialId || effectiveId || (matList.length > 0 ? matList[0].id : null)
+        setActiveMaterialId(currentMatId)
+        if (currentMatId && typeof window !== 'undefined') {
+          localStorage.setItem('gapfinder_active_material_id', currentMatId)
+        }
+        const currentMat = matList.find((m) => m.id === currentMatId)
+        if (currentMat) {
+          setActiveMaterialTitle(currentMat.title)
+        }
+
         const initialExpanded: Record<string, boolean> = {}
         data.topics?.forEach((t: ParentTopic) => {
           initialExpanded[t.id] = true
@@ -60,8 +89,31 @@ export default function TopicMapPage() {
   }
 
   useEffect(() => {
-    fetchTopics()
+    const params = new URLSearchParams(window.location.search)
+    const urlMatId = params.get('materialId')
+    fetchTopicsAndMaterials(urlMatId)
   }, [])
+
+  const handleMaterialChange = (matId: string) => {
+    // Clear previous material's topics immediately to prevent cross-material topic leaks
+    setTopics([])
+    setActiveMaterialId(matId)
+    if (typeof window !== 'undefined') {
+      if (matId === 'all') {
+        localStorage.removeItem('gapfinder_active_material_id')
+      } else {
+        localStorage.setItem('gapfinder_active_material_id', matId)
+      }
+      const url = new URL(window.location.href)
+      if (matId === 'all') {
+        url.searchParams.delete('materialId')
+      } else {
+        url.searchParams.set('materialId', matId)
+      }
+      window.history.replaceState({}, '', url.toString())
+    }
+    fetchTopicsAndMaterials(matId)
+  }
 
   const toggleExpand = (id: string) => {
     setExpandedTopics((prev) => ({ ...prev, [id]: !prev[id] }))
@@ -103,12 +155,28 @@ export default function TopicMapPage() {
   return (
     <AppLayout
       headerTitle="Syllabus & Topic Map"
-      headerSubtitle="Hierarchical breakdown of your curriculum with real-time diagnostic health"
+      headerSubtitle={
+        activeMaterialTitle
+          ? `Curriculum breakdown for: ${activeMaterialTitle}`
+          : 'Hierarchical breakdown of your curriculum with real-time diagnostic health'
+      }
       actionButton={
-        <Link href="/quiz" className="btn-primary flex items-center gap-2 text-xs py-2 px-3">
-          <LuBrain size={16} />
-          <span>Launch Full Diagnostic Quiz</span>
-        </Link>
+        <div className="flex items-center flex-wrap gap-2">
+          {materials.length > 0 && (
+            <MaterialContextSelector
+              materials={materials}
+              activeMaterialId={activeMaterialId}
+              onSelectMaterial={handleMaterialChange}
+            />
+          )}
+          <Link
+            href={activeMaterialId && activeMaterialId !== 'all' ? `/quiz?materialId=${activeMaterialId}` : '/quiz'}
+            className="btn-primary flex items-center gap-2 text-xs py-2 px-3"
+          >
+            <LuBrain size={16} />
+            <span>Launch Diagnostic Quiz</span>
+          </Link>
+        </div>
       }
     >
       <div className="space-y-6 pb-12">
@@ -188,7 +256,7 @@ export default function TopicMapPage() {
                     <div className="flex items-center gap-4 shrink-0">
                       {getStrengthBadge(topic.strength, topic.score)}
                       <Link
-                        href={`/quiz?topicId=${topic.id}`}
+                        href={`/quiz?topicId=${topic.id}${activeMaterialId ? `&materialId=${encodeURIComponent(activeMaterialId)}` : ''}`}
                         onClick={(e) => e.stopPropagation()}
                         className="btn-secondary hidden sm:flex items-center gap-1.5 text-xs py-1.5 px-3"
                       >

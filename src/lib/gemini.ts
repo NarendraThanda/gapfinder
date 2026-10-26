@@ -74,153 +74,310 @@ export async function generateJSON<T>(prompt: string, systemInstruction?: string
 function fallbackJSONGeneration<T>(prompt: string): T {
   const lower = prompt.toLowerCase()
 
+  // Helper to extract text following a header like "SYLLABUS TEXT:" or "STUDY MATERIAL CONTEXT:"
+  const extractSection = (header: string): string => {
+    const idx = prompt.indexOf(header)
+    if (idx !== -1) {
+      return prompt.slice(idx + header.length).trim()
+    }
+    return prompt
+  }
+
   // Case 1: Topic Extraction
   if (lower.includes('extract the main topics') || lower.includes('syllabus')) {
-    return [
-      {
-        name: 'Process Management & CPU Scheduling',
-        description: 'Process state transitions, context switching, Round Robin, and MLFQ algorithms.',
-        subtopics: [
-          { name: 'Process Lifecycle & PCB', description: 'Process control blocks and kernel scheduling.' },
-          { name: 'Scheduling Metrics', description: 'Turnaround time, latency, and CPU burst times.' },
-        ],
-      },
-      {
-        name: 'Virtual Memory & Address Translation',
-        description: 'Demand paging, Translation Lookaside Buffer (TLB), and working set models.',
-        subtopics: [
-          { name: 'Effective Memory Access Time', description: 'Mathematical memory access under varying hit ratios.' },
-          { name: 'Page Replacement Algorithms', description: 'FIFO, LRU, Clock, and Belady\'s Anomaly.' },
-        ],
-      },
-      {
-        name: 'Deadlocks & Concurrency Control',
-        description: 'Coffman conditions, resource allocation graphs, and the Banker\'s algorithm.',
-        subtopics: [
-          { name: 'The Banker\'s Safety Algorithm', description: 'Need and Allocation vector verification.' },
-          { name: 'Synchronization Primitives', description: 'Semaphores, Mutex locks, and Monitors.' },
-        ],
-      },
-    ] as unknown as T
+    const text = extractSection('SYLLABUS TEXT:')
+    return extractDynamicTopics(text) as unknown as T
   }
 
   // Case 2: Question Generation
-  if (lower.includes('quiz questions') || lower.includes('multiple-choice')) {
+  if (lower.includes('quiz questions') || lower.includes('multiple-choice') || lower.includes('return a json array where each element has:\n- "question"')) {
+    // Extract topic name if available
+    const topicMatch = prompt.match(/"topic_name":\s*"([^"]+)"/i) || prompt.match(/TOPIC:\s*([^\n]+)/i)
+    const topicName = topicMatch ? topicMatch[1].trim() : 'Core Concepts'
+
+    // Extract context lines
+    const context = extractSection('STUDY MATERIAL CONTEXT:')
+    const sentences = context.split(/[\.\n]/).map(s => s.trim()).filter(s => s.length > 25)
+
+    const q1 = sentences[0] || `${topicName} covers core conceptual patterns and computational rules.`
+    const q2 = sentences[1] || `${topicName} requires verifying syntax specifications and system constraints.`
+
     return [
       {
-        question: 'Under demand paging, what constitutes Effective Memory Access Time (EMAT) when a TLB miss occurs?',
+        question: `Based on your material for ${topicName}, which of the following is accurate?`,
         options: [
-          'Direct cache retrieval without accessing memory tables',
-          'Two main memory accesses: one to retrieve page table entry and one for target data',
-          'Immediate abort and processor reset',
-          'Single memory access using associative registers',
+          q1.slice(0, 100),
+          `It operates without respecting the defined operational specifications of ${topicName}`,
+          `It is completely deprecated and removed in recent revisions`,
+          `It requires external intervention for every single execution cycle`,
         ],
-        correct_answer: 1,
-        explanation: 'On a TLB miss, the MMU must first look up the page table in RAM, then perform a second access to read/write the physical address.',
-        citation: 'Section 3.2: "translating virtual to physical memory requires two memory accesses: one for page table entry, one for actual data"',
+        correct_answer: 0,
+        explanation: `According to your study material: "${q1.slice(0, 150)}"`,
+        citation: `Section on ${topicName}: "${q1.slice(0, 120)}"`,
         difficulty: 'medium',
-        topic_name: 'Virtual Memory',
+        topic_name: topicName,
       },
       {
-        question: 'Which of the following describes the core mechanism of Edsger Dijkstra\'s Banker\'s Algorithm?',
+        question: `What primary mechanism is detailed in the material regarding ${topicName}?`,
         options: [
-          'Randomly terminating lowest-priority jobs',
-          'Testing for safety by simulating maximum possible resource requests before granting allocation',
-          'Immediately preempting all allocated resources upon process block',
-          'Increasing physical frame limits past working set window Δ',
+          `Arbitrary and unconstrained memory execution`,
+          q2.slice(0, 100),
+          `Immediate abort on first execution cycle`,
+          `Manual register overrides exclusively`,
         ],
         correct_answer: 1,
-        explanation: 'The Banker\'s algorithm simulates the allocation of predetermined maximum claims to verify that at least one safe sequence exists.',
-        citation: 'Section 2.4: "The Banker\'s Algorithm tests for safety by simulating maximum possible amounts before allocation"',
+        explanation: `Your uploaded text states: "${q2.slice(0, 150)}"`,
+        citation: `Section on ${topicName}: "${q2.slice(0, 120)}"`,
         difficulty: 'hard',
-        topic_name: 'Deadlocks',
+        topic_name: topicName,
       },
     ] as unknown as T
   }
 
   // Case 3: Gap Analysis
-  if (lower.includes('gap analysis') || lower.includes('strength in each topic')) {
+  if (lower.includes('gap analysis') || lower.includes('strength in each topic') || lower.includes('quiz results:')) {
+    // Parse quiz results from prompt
+    let parsedTopics: Array<{ topic_name: string; total: number; correct: number }> = []
+    const quizResultsIdx = prompt.indexOf('QUIZ RESULTS:')
+    if (quizResultsIdx !== -1) {
+      try {
+        const jsonCandidate = prompt.slice(quizResultsIdx + 'QUIZ RESULTS:'.length).trim()
+        const match = jsonCandidate.match(/\[[\s\S]*?\]/)
+        if (match) {
+          parsedTopics = JSON.parse(match[0])
+        }
+      } catch {
+        // Fallback
+      }
+    }
+
+    if (parsedTopics.length > 0) {
+      return parsedTopics.map((pt, idx) => {
+        const score = pt.total > 0 ? Math.round((pt.correct / pt.total) * 100) : 50
+        const strength: 'weak' | 'medium' | 'strong' = score < 50 ? 'weak' : score < 80 ? 'medium' : 'strong'
+        return {
+          topic_name: pt.topic_name,
+          strength,
+          score,
+          reason: strength === 'weak'
+            ? `Demonstrated knowledge gap in ${pt.topic_name} with ${pt.correct}/${pt.total} correct responses.`
+            : strength === 'medium'
+            ? `Partial understanding of ${pt.topic_name}. Review key problem solving techniques.`
+            : `Strong mastery demonstrated in ${pt.topic_name} diagnostic assessment.`,
+          suggestions: [
+            `Review targeted section on ${pt.topic_name}`,
+            `Practice 3-5 exercises on ${pt.topic_name} edge cases`,
+          ],
+        }
+      }) as unknown as T
+    }
+
     return [
       {
-        topic_name: 'Virtual Memory & Address Translation',
+        topic_name: 'Core Topic Analysis',
         strength: 'weak',
-        score: 33,
-        reason: 'Misconception regarding dual memory access latency on TLB miss and working set memory windows.',
-        suggestions: [
-          'Derive EMAT formula with hit ratios from 80% to 95%',
-          'Review working set window Δ against thrashing triggers',
-        ],
-      },
-      {
-        topic_name: 'Deadlocks & Concurrency Control',
-        strength: 'medium',
-        score: 65,
-        reason: 'Understands Coffman conditions but needs practice calculating Banker\'s safety state vectors.',
-        suggestions: [
-          'Execute manual step-by-step vector matrix subtraction',
-        ],
-      },
-      {
-        topic_name: 'Process Management & CPU Scheduling',
-        strength: 'strong',
-        score: 88,
-        reason: 'Demonstrated solid grasp of PCB structures, context switches, and scheduling criteria.',
-        suggestions: [
-          'Maintain fluency with quick flashcard reviews',
-        ],
+        score: 40,
+        reason: 'Identified conceptual uncertainty on foundational questions.',
+        suggestions: ['Review core lecture notes and key formulas', 'Practice exam questions'],
       },
     ] as unknown as T
   }
 
   // Case 4: Revision Plan
-  if (lower.includes('revision plan') || lower.includes('study hours')) {
-    return [
-      {
-        topic_name: 'Virtual Memory & Address Translation',
-        priority: 'high',
-        estimated_hours: 4.5,
-        strength: 'weak',
-        activities: [
-          'Derive the EMAT latency equation with varying hit ratios',
-          'Solve numerical problems on page table lookups and page faults',
-        ],
-        resources: ['Lecture Notes Section 3.2', 'Midterm Exam Q3'],
-      },
-      {
-        topic_name: 'Deadlocks & Concurrency Control',
-        priority: 'medium',
-        estimated_hours: 2.5,
-        strength: 'medium',
-        activities: [
-          'Trace Banker\'s algorithm with 5 processes and 3 resources',
-        ],
-        resources: ['Lecture Notes Section 2.4'],
-      },
-      {
-        topic_name: 'Process Management & CPU Scheduling',
-        priority: 'low',
-        estimated_hours: 1.0,
-        strength: 'strong',
-        activities: [
-          'Review PCB register restoration and MLFQ aging',
-        ],
-        resources: ['Syllabus Module 1'],
-      },
-    ] as unknown as T
+  if (lower.includes('revision plan') || lower.includes('study hours') || lower.includes('gap analysis:')) {
+    // Parse gap analysis from prompt
+    let gapData: Array<{ topic_name: string; strength?: string; score?: number }> = []
+    const gapIdx = prompt.indexOf('GAP ANALYSIS:')
+    if (gapIdx !== -1) {
+      try {
+        const jsonCandidate = prompt.slice(gapIdx + 'GAP ANALYSIS:'.length).trim()
+        const match = jsonCandidate.match(/\[[\s\S]*?\]/)
+        if (match) {
+          gapData = JSON.parse(match[0])
+        }
+      } catch {
+        // Fallback
+      }
+    }
+
+    if (gapData.length > 0) {
+      return gapData.map((g, idx) => {
+        const priority: 'high' | 'medium' | 'low' = g.strength === 'weak' ? 'high' : g.strength === 'medium' ? 'medium' : 'low'
+        const hours = priority === 'high' ? 4 : priority === 'medium' ? 2.5 : 1.5
+        return {
+          topic_name: g.topic_name,
+          priority,
+          estimated_hours: hours,
+          strength: g.strength || 'medium',
+          activities: [
+            `Remediate core concepts for ${g.topic_name}`,
+            `Solve targeted numerical and conceptual exercises`,
+          ],
+          resources: [`Course Materials - ${g.topic_name}`],
+        }
+      }) as unknown as T
+    }
+
+    return [] as unknown as T
   }
 
   // Case 5: RAG Chat
   if (lower.includes('answer the student\'s question')) {
+    const context = extractSection('STUDY MATERIAL CONTEXT:')
+    const snippet = context.slice(0, 300).trim() || 'Refer to your uploaded study material.'
     return {
-      answer: 'According to your uploaded materials, Effective Memory Access Time (EMAT) is calculated based on the TLB hit ratio (α), TLB lookup time (ε), and main memory access latency (m):\n\n$$\\text{EMAT} = (m + \\epsilon) \\cdot \\alpha + (2m + \\epsilon) \\cdot (1 - \\alpha)$$\n\nWhen a TLB miss occurs, two memory accesses are mandatory: one to look up the page table entry (PTE) in RAM, and one to read or write the actual physical memory cell.',
+      answer: `Based on your uploaded study material:\n\n${snippet}\n\nThis directly answers your question regarding this topic.`,
       citations: [
         {
-          source: 'Lecture Notes Section 3.2',
-          content: 'EMAT = (m + ε) * α + (2m + ε) * (1 - α). With hit ratio 90%, TLB lookup 2ns, and memory access 100ns: EMAT = 112ns',
+          source: 'Uploaded Document',
+          content: snippet.slice(0, 150),
         },
       ],
     } as unknown as T
   }
 
   return [] as unknown as T
+}
+
+function extractDynamicTopics(text: string): any[] {
+  const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 3)
+  const candidateTopics: { name: string; description: string; subtopics: any[] }[] = []
+
+  // Extract explicit units, chapters, modules, or markdown headers
+  for (const line of lines) {
+    const clean = line.replace(/^([#*-]|\d+[\.)]|unit\s*\d+:?|module\s*\d+:?|chapter\s*\d+:?)\s*/i, '').trim()
+    if (clean.length >= 4 && clean.length <= 75 && !clean.includes('http') && !clean.endsWith('?')) {
+      if (
+        /^(module|unit|chapter|\d+[\.)])/i.test(line) ||
+        line.startsWith('#') ||
+        (/^[A-Z]/.test(clean) && clean.length < 50 && !clean.endsWith('.'))
+      ) {
+        if (!candidateTopics.some(t => t.name.toLowerCase() === clean.toLowerCase())) {
+          candidateTopics.push({
+            name: clean,
+            description: `Core concepts and practical techniques for ${clean}.`,
+            subtopics: [
+              { name: `${clean} Foundations`, description: `Fundamental principles and syntax of ${clean}.` },
+              { name: `${clean} Applications`, description: `Problem solving and execution patterns in ${clean}.` },
+            ],
+          })
+          if (candidateTopics.length >= 6) break
+        }
+      }
+    }
+  }
+
+  if (candidateTopics.length >= 2) {
+    return candidateTopics
+  }
+
+  // Domain-aware keyword detection
+  const lower = text.toLowerCase()
+
+  // Python domain
+  if (lower.includes('python') || lower.includes('list') || lower.includes('tuple') || lower.includes('dictionary') || lower.includes('dict')) {
+    return [
+      {
+        name: 'Python Lists, Tuples & Sequences',
+        description: 'Sequence indexing, slicing, immutability, list comprehensions, and memory layout.',
+        subtopics: [
+          { name: 'List Comprehensions & Mutations', description: 'In-place modifications vs new allocations.' },
+          { name: 'Tuples & Immutability', description: 'Hashability and tuple unpacking idioms.' },
+        ],
+      },
+      {
+        name: 'Dictionaries & Set Operations',
+        description: 'Hash map lookups, key-value mapping, collision handling, and set operations.',
+        subtopics: [
+          { name: 'Dictionary Key Constraints', description: 'Hashable keys and time complexity.' },
+          { name: 'Set Operations', description: 'Unions, intersections, and symmetric differences.' },
+        ],
+      },
+      {
+        name: 'Control Flow & Functions',
+        description: 'Iterators, generators, args/kwargs, and lambda expressions in Python.',
+        subtopics: [
+          { name: 'Scope & Closures', description: 'LEGB rule and closure retention.' },
+          { name: 'Generators & Yield', description: 'Lazy evaluation and memory efficiency.' },
+        ],
+      },
+    ]
+  }
+
+  // SQL domain
+  if (lower.includes('sql') || lower.includes('join') || lower.includes('group by') || lower.includes('select')) {
+    return [
+      {
+        name: 'SQL Joins & Relational Algebra',
+        description: 'INNER, LEFT, RIGHT, FULL OUTER, and CROSS joins, Cartesian products, and join conditions.',
+        subtopics: [
+          { name: 'Inner vs Outer Joins', description: 'Handling unmatched rows and NULL semantics.' },
+          { name: 'Multi-table Join Execution', description: 'Join ordering and optimization paths.' },
+        ],
+      },
+      {
+        name: 'Aggregation & GROUP BY Clauses',
+        description: 'SUM, COUNT, AVG, MIN, MAX, HAVING filters, and partitioned aggregations.',
+        subtopics: [
+          { name: 'WHERE vs HAVING', description: 'Filtering before vs after aggregation.' },
+          { name: 'Grouping Sets & Rollups', description: 'Hierarchical and multi-dimensional grouping.' },
+        ],
+      },
+      {
+        name: 'Subqueries & Common Table Expressions',
+        description: 'Correlated subqueries, CTEs, WITH RECURSIVE, and window ranking functions.',
+        subtopics: [
+          { name: 'Window Functions', description: 'ROW_NUMBER, RANK, DENSE_RANK, and OVER clauses.' },
+          { name: 'Common Table Expressions (CTEs)', description: 'Readability and modular SQL pipelines.' },
+        ],
+      },
+    ]
+  }
+
+  // General vocabulary synthesis from text
+  const words = text
+    .split(/\s+/)
+    .map(w => w.replace(/[^a-zA-Z]/g, ''))
+    .filter(w => w.length > 5 && !['course', 'university', 'student', 'syllabus', 'material', 'lecture', 'chapter'].includes(w.toLowerCase()))
+
+  const unique = Array.from(new Set(words.map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()))).slice(0, 8)
+  if (unique.length >= 3) {
+    return [
+      {
+        name: `${unique[0]} & ${unique[1]} Principles`,
+        description: `Fundamental principles, theorems, and mechanisms of ${unique[0]} and ${unique[1]}.`,
+        subtopics: [
+          { name: `${unique[0]} Foundations`, description: `Core definitions and rules for ${unique[0]}.` },
+          { name: `${unique[1]} Analysis`, description: `Analytical techniques for ${unique[1]}.` },
+        ],
+      },
+      {
+        name: `${unique[2]} Architecture & Methods`,
+        description: `Operational models, structural characteristics, and evaluation of ${unique[2]}.`,
+        subtopics: [
+          { name: `${unique[2]} Frameworks`, description: `Practical implementations of ${unique[2]}.` },
+          { name: 'Diagnostic Indicators', description: 'Performance criteria and diagnostic assessment.' },
+        ],
+      },
+      {
+        name: `${unique[3] || unique[0]} Applications`,
+        description: `Applied problem solving, optimization, and synthesis of ${unique[3] || unique[0]}.`,
+        subtopics: [
+          { name: 'Methodological Review', description: 'Key operations and workflow steps.' },
+          { name: 'Practical Problem Solving', description: 'Exercises and real-world scenarios.' },
+        ],
+      },
+    ]
+  }
+
+  return [
+    {
+      name: 'Core Curriculum Concepts',
+      description: 'Primary topics extracted from your uploaded study document.',
+      subtopics: [
+        { name: 'Fundamental Definitions', description: 'Core principles and terms.' },
+        { name: 'Applied Problem Solving', description: 'Practical exercises and analytical methods.' },
+      ],
+    },
+  ]
 }

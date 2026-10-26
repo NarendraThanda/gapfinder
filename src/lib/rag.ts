@@ -239,17 +239,23 @@ Rules:
 export async function searchSimilarChunks(
   query: string,
   userId: string,
-  limit: number = 5
+  limit: number = 5,
+  materialId?: string | null
 ): Promise<{ content: string; topic_hint: string | null; similarity: number }[]> {
   const supabase = createClient()
   const embedding = await generateEmbedding(query)
 
-  const { data, error } = await supabase.rpc('match_chunks', {
+  const params: any = {
     query_embedding: embedding,
     match_user_id: userId,
     match_count: limit,
     match_threshold: 0.3,
-  })
+  }
+  if (materialId) {
+    params.match_material_id = materialId
+  }
+
+  const { data, error } = await supabase.rpc('match_chunks', params)
 
   if (error) {
     console.error('Vector search error:', error)

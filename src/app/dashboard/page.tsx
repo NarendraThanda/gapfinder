@@ -36,21 +36,41 @@ interface TopicItem {
   score: number
 }
 
+import MaterialContextSelector, { MaterialOption } from '@/components/MaterialContextSelector'
+
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [topics, setTopics] = useState<TopicItem[]>([])
+  const [materials, setMaterials] = useState<MaterialOption[]>([])
+  const [activeMaterialId, setActiveMaterialId] = useState<string | null>(null)
+  const [activeMaterialTitle, setActiveMaterialTitle] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [seeding, setSeeding] = useState(false)
   const [seedSuccess, setSeedSuccess] = useState('')
 
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = async (targetId?: string | null) => {
     try {
       setLoading(true)
-      const res = await fetch('/api/progress')
+      const storedId = typeof window !== 'undefined' ? localStorage.getItem('gapfinder_active_material_id') : null
+      const effectiveId = targetId !== undefined ? targetId : (activeMaterialId || storedId)
+      const query = effectiveId ? `?materialId=${encodeURIComponent(effectiveId)}` : ''
+      const res = await fetch(`/api/progress${query}`)
       if (res.ok) {
         const data = await res.json()
         setStats(data.stats)
         setTopics(data.topics || [])
+        if (data.materials) {
+          setMaterials(data.materials)
+        }
+        if (data.activeMaterialId !== undefined) {
+          setActiveMaterialId(data.activeMaterialId)
+          if (data.activeMaterialId && typeof window !== 'undefined') {
+            localStorage.setItem('gapfinder_active_material_id', data.activeMaterialId)
+          }
+        }
+        if (data.activeMaterialTitle) {
+          setActiveMaterialTitle(data.activeMaterialTitle)
+        }
       }
     } catch (err) {
       console.error('Error fetching dashboard:', err)
@@ -60,8 +80,32 @@ export default function DashboardPage() {
   }
 
   useEffect(() => {
-    fetchDashboardData()
+    const params = new URLSearchParams(window.location.search)
+    const urlMatId = params.get('materialId')
+    fetchDashboardData(urlMatId)
   }, [])
+
+  const handleMaterialChange = (matId: string) => {
+    // Clear previous material's state immediately to prevent stale topic display
+    setTopics([])
+    setStats(null)
+    setActiveMaterialId(matId)
+    if (typeof window !== 'undefined') {
+      if (matId === 'all') {
+        localStorage.removeItem('gapfinder_active_material_id')
+      } else {
+        localStorage.setItem('gapfinder_active_material_id', matId)
+      }
+      const url = new URL(window.location.href)
+      if (matId === 'all') {
+        url.searchParams.delete('materialId')
+      } else {
+        url.searchParams.set('materialId', matId)
+      }
+      window.history.replaceState({}, '', url.toString())
+    }
+    fetchDashboardData(matId)
+  }
 
   const handleSeedDemo = async () => {
     try {
@@ -71,7 +115,12 @@ export default function DashboardPage() {
       const data = await res.json()
       if (res.ok) {
         setSeedSuccess('Demo syllabus, diagnostic quiz & revision plan preloaded successfully!')
-        await fetchDashboardData()
+        if (data.syllabus?.id) {
+          localStorage.setItem('gapfinder_active_material_id', data.syllabus.id)
+          await fetchDashboardData(data.syllabus.id)
+        } else {
+          await fetchDashboardData()
+        }
       } else {
         setSeedSuccess(data.error || 'Failed to preload data.')
       }
@@ -89,17 +138,30 @@ export default function DashboardPage() {
   return (
     <AppLayout
       headerTitle="Diagnosis Dashboard"
-      headerSubtitle="Real-time analysis of your knowledge gaps grounded in your materials"
+      headerSubtitle={
+        activeMaterialTitle
+          ? `Analysis for: ${activeMaterialTitle}`
+          : 'Real-time analysis of your knowledge gaps grounded in your materials'
+      }
       actionButton={
-        <button
-          onClick={handleSeedDemo}
-          disabled={seeding}
-          className="btn-secondary flex items-center gap-2 text-xs md:text-sm py-2 px-3"
-          id="preload-demo-btn"
-        >
-          <LuSparkles size={16} className={seeding ? 'animate-spin' : 'text-purple-400'} />
-          {seeding ? 'Preloading Sample Material...' : '⚡ Preload Sample Course (Judge Mode)'}
-        </button>
+        <div className="flex items-center flex-wrap gap-2">
+          {materials.length > 0 && (
+            <MaterialContextSelector
+              materials={materials}
+              activeMaterialId={activeMaterialId}
+              onSelectMaterial={handleMaterialChange}
+            />
+          )}
+          <button
+            onClick={handleSeedDemo}
+            disabled={seeding}
+            className="btn-secondary flex items-center gap-2 text-xs md:text-sm py-2 px-3"
+            id="preload-demo-btn"
+          >
+            <LuSparkles size={16} className={seeding ? 'animate-spin' : 'text-purple-400'} />
+            {seeding ? 'Preloading Sample Material...' : '⚡ Preload Sample Course (Judge Mode)'}
+          </button>
+        </div>
       }
     >
       <div className="space-y-8 pb-12">
@@ -144,9 +206,13 @@ export default function DashboardPage() {
             </div>
 
             <div className="flex flex-wrap gap-3">
-              <Link href="/quiz" className="btn-primary flex items-center gap-2" id="start-quiz-btn">
+              <Link
+                href={activeMaterialId && activeMaterialId !== 'all' ? `/quiz?materialId=${activeMaterialId}` : '/quiz'}
+                className="btn-primary flex items-center gap-2"
+                id="start-quiz-btn"
+              >
                 <LuBrain size={18} />
-                <span>Take Diagnostic Quiz</span>
+                <span>{activeMaterialTitle ? `Diagnose ${activeMaterialTitle}` : 'Take Diagnostic Quiz'}</span>
                 <LuArrowRight size={16} />
               </Link>
               <Link href="/materials" className="btn-secondary flex items-center gap-2" id="upload-materials-btn">
@@ -156,6 +222,35 @@ export default function DashboardPage() {
             </div>
           </div>
         </div>
+
+        {/* Empty Assessment Callout for Fresh Material */}
+        {activeMaterialTitle && stats?.completedQuizzes === 0 && topics.length > 0 && (
+          <div
+            className="p-6 rounded-2xl glass-static border border-purple-500/30 flex items-center justify-between flex-wrap gap-4"
+            style={{ background: 'rgba(168, 85, 247, 0.08)' }}
+          >
+            <div className="flex items-start gap-3">
+              <div className="p-2.5 rounded-xl bg-purple-500/20 text-purple-300 mt-0.5">
+                <LuSparkles size={20} />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white">
+                  Assessment Needed for &ldquo;{activeMaterialTitle}&rdquo;
+                </h3>
+                <p className="text-xs mt-1 text-gray-300 max-w-xl">
+                  {topics.length} topics extracted from this study material. Launch your first diagnostic quiz to discover blindspots and generate your gap analysis report.
+                </p>
+              </div>
+            </div>
+            <Link
+              href={`/quiz?materialId=${activeMaterialId}`}
+              className="btn-primary text-xs py-2 px-4 flex items-center gap-1.5"
+            >
+              <LuBrain size={15} />
+              <span>Start Assessment</span>
+            </Link>
+          </div>
+        )}
 
         {/* Stat Cards Grid */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 md:gap-6">

@@ -1,8 +1,10 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Suspense } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import AppLayout from '@/components/AppLayout'
+import MaterialContextSelector, { MaterialOption } from '@/components/MaterialContextSelector'
 import {
   LuCalendarCheck,
   LuClock,
@@ -14,6 +16,7 @@ import {
   LuTriangleAlert,
   LuCheck,
   LuHistory,
+  LuBrain,
 } from 'react-icons/lu'
 
 interface PlanItem {
@@ -110,20 +113,49 @@ function normalizeClientPlanItem(item: any, idx: number): PlanItem {
 }
 
 export default function RevisionPlanPage() {
+  return (
+    <Suspense fallback={<div className="p-12 text-center text-sm text-gray-400">Loading revision plan...</div>}>
+      <RevisionPlanContent />
+    </Suspense>
+  )
+}
+
+function RevisionPlanContent() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const urlMaterialId = searchParams.get('materialId')
+
   const [plans, setPlans] = useState<RevisionPlanRecord[]>([])
   const [activePlan, setActivePlan] = useState<RevisionPlanRecord | null>(null)
+  const [materials, setMaterials] = useState<MaterialOption[]>([])
+  const [activeMaterialId, setActiveMaterialId] = useState<string | null>(urlMaterialId)
+  const [activeMaterialTitle, setActiveMaterialTitle] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [hoursInput, setHoursInput] = useState(10)
   const [generating, setGenerating] = useState(false)
   const [statusMessage, setStatusMessage] = useState<{ type: 'error' | 'success'; text: string } | null>(null)
 
-  const fetchPlans = async () => {
+  const fetchPlansAndMaterials = async (targetId?: string | null) => {
     try {
       setLoading(true)
       setStatusMessage(null)
-      const res = await fetch('/api/plan')
-      if (res.ok) {
-        const data = await res.json()
+      const storedId = typeof window !== 'undefined' ? localStorage.getItem('gapfinder_active_material_id') : null
+      const effectiveMatId = targetId !== undefined ? targetId : (urlMaterialId || activeMaterialId || storedId)
+
+      const [matRes, planRes] = await Promise.all([
+        fetch('/api/materials'),
+        fetch(`/api/plan${effectiveMatId && effectiveMatId !== 'all' ? `?materialId=${encodeURIComponent(effectiveMatId)}` : ''}`),
+      ])
+
+      let matList: MaterialOption[] = []
+      if (matRes.ok) {
+        const matData = await matRes.json()
+        matList = matData.materials || []
+        setMaterials(matList)
+      }
+
+      if (planRes.ok) {
+        const data = await planRes.json()
         const rawList: RevisionPlanRecord[] = data.plans || []
         const normalizedList = rawList.map((p) => ({
           ...p,
@@ -133,9 +165,21 @@ export default function RevisionPlanPage() {
         if (normalizedList.length > 0) {
           setActivePlan(normalizedList[0])
           setHoursInput(normalizedList[0].available_hours || 10)
+        } else {
+          setActivePlan(null)
+        }
+
+        const currentMatId = data.activeMaterialId || effectiveMatId || (matList.length > 0 ? matList[0].id : null)
+        setActiveMaterialId(currentMatId)
+        if (currentMatId && typeof window !== 'undefined') {
+          localStorage.setItem('gapfinder_active_material_id', currentMatId)
+        }
+        const currentMat = matList.find((m) => m.id === currentMatId)
+        if (currentMat) {
+          setActiveMaterialTitle(currentMat.title)
         }
       } else {
-        const errData = await res.json().catch(() => ({}))
+        const errData = await planRes.json().catch(() => ({}))
         setStatusMessage({
           type: 'error',
           text: errData.error || 'Failed to load revision plans from server.',
@@ -153,8 +197,30 @@ export default function RevisionPlanPage() {
   }
 
   useEffect(() => {
-    fetchPlans()
-  }, [])
+    fetchPlansAndMaterials(urlMaterialId)
+  }, [urlMaterialId])
+
+  const handleMaterialChange = (matId: string) => {
+    // Clear previous material's plans immediately to prevent cross-contamination
+    setPlans([])
+    setActivePlan(null)
+    setActiveMaterialId(matId)
+    if (typeof window !== 'undefined') {
+      if (matId === 'all') {
+        localStorage.removeItem('gapfinder_active_material_id')
+      } else {
+        localStorage.setItem('gapfinder_active_material_id', matId)
+      }
+      const url = new URL(window.location.href)
+      if (matId === 'all') {
+        url.searchParams.delete('materialId')
+      } else {
+        url.searchParams.set('materialId', matId)
+      }
+      window.history.replaceState({}, '', url.toString())
+    }
+    fetchPlansAndMaterials(matId)
+  }
 
   const handleGenerateNewPlan = async () => {
     try {
@@ -163,7 +229,10 @@ export default function RevisionPlanPage() {
       const res = await fetch('/api/plan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ availableHours: hoursInput }),
+        body: JSON.stringify({
+          availableHours: hoursInput,
+          materialId: activeMaterialId,
+        }),
       })
 
       const data = await res.json().catch(() => ({}))
@@ -238,7 +307,29 @@ export default function RevisionPlanPage() {
   return (
     <AppLayout
       headerTitle="Personalized Revision Plan"
-      headerSubtitle="Prioritized study schedule allocating maximum hours to identified knowledge gaps"
+      headerSubtitle={
+        activeMaterialTitle
+          ? `Study schedule optimized for: ${activeMaterialTitle}`
+          : 'Prioritized study schedule allocating maximum hours to identified knowledge gaps'
+      }
+      actionButton={
+        <div className="flex items-center flex-wrap gap-2">
+          {materials.length > 0 && (
+            <MaterialContextSelector
+              materials={materials}
+              activeMaterialId={activeMaterialId}
+              onSelectMaterial={handleMaterialChange}
+            />
+          )}
+          <Link
+            href={activeMaterialId && activeMaterialId !== 'all' ? `/quiz?materialId=${activeMaterialId}` : '/quiz'}
+            className="btn-secondary text-xs py-2 px-3 flex items-center gap-1.5"
+          >
+            <LuBrain size={14} />
+            <span>Retake Diagnostic Quiz</span>
+          </Link>
+        </div>
+      }
     >
       <div className="space-y-8 pb-12">
         {/* Status notification banner */}
@@ -350,9 +441,15 @@ export default function RevisionPlanPage() {
           <div className="glass p-12 text-center space-y-4">
             <LuCalendarCheck className="mx-auto text-gray-500" size={48} />
             <div>
-              <h3 className="text-base font-bold text-white">No Revision Plan Generated Yet</h3>
+              <h3 className="text-base font-bold text-white">
+                {activeMaterialTitle
+                  ? `No Revision Plan for "${activeMaterialTitle}" Yet`
+                  : 'No Revision Plan Generated Yet'}
+              </h3>
               <p className="text-xs mt-1 max-w-md mx-auto" style={{ color: 'var(--text-secondary)' }}>
-                Click below to instantly create an AI-powered revision plan tailored to your study schedule.
+                {activeMaterialTitle
+                  ? `Click below to create an AI-powered revision plan tailored to ${activeMaterialTitle}, or diagnose gaps first.`
+                  : 'Click below to instantly create an AI-powered revision plan tailored to your study schedule.'}
               </p>
             </div>
             <div className="flex flex-wrap justify-center gap-3 pt-2">
@@ -373,7 +470,10 @@ export default function RevisionPlanPage() {
                   </>
                 )}
               </button>
-              <Link href="/quiz" className="btn-secondary text-xs py-2.5 px-4 flex items-center gap-1.5">
+              <Link
+                href={activeMaterialId && activeMaterialId !== 'all' ? `/quiz?materialId=${activeMaterialId}` : '/quiz'}
+                className="btn-secondary text-xs py-2.5 px-4 flex items-center gap-1.5"
+              >
                 Take Diagnostic Quiz
               </Link>
               <Link href="/dashboard" className="btn-secondary text-xs py-2.5 px-4 flex items-center gap-1.5">

@@ -147,21 +147,31 @@ export async function POST(request: Request) {
     }
 
     let availableHours = 10
+    let materialId: string | null = null
     try {
       const body = await request.json()
       if (typeof body.availableHours === 'number' && body.availableHours > 0) {
         availableHours = body.availableHours
       }
+      if (body.materialId && typeof body.materialId === 'string') {
+        materialId = body.materialId
+      }
     } catch {
-      // Use default 10 hours
+      // Use defaults
     }
 
-    // 1. Fetch latest gap reports for this user
-    const { data: reports } = await supabase
+    // 1. Fetch latest gap reports for this user (scoped to material if specified)
+    let reportsQuery = supabase
       .from('gap_reports')
       .select('*')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
+
+    if (materialId && materialId !== 'all') {
+      reportsQuery = reportsQuery.eq('material_id', materialId)
+    }
+
+    const { data: reports } = await reportsQuery
 
     let gapData: Array<{
       topic_name: string
@@ -194,12 +204,18 @@ export async function POST(request: Request) {
       }))
       allTopics = Object.values(latestPerTopic).map((r) => r.topic_name)
     } else {
-      // 2. Fallback: check if user has topics in `topics` table
-      const { data: userTopics } = await supabase
+      // 2. Fallback: check if user has topics in `topics` table (scoped to material)
+      let topicsQuery = supabase
         .from('topics')
         .select('*')
         .eq('user_id', user.id)
         .is('parent_topic_id', null)
+
+      if (materialId && materialId !== 'all') {
+        topicsQuery = topicsQuery.eq('material_id', materialId)
+      }
+
+      const { data: userTopics } = await topicsQuery
 
       if (userTopics && userTopics.length > 0) {
         gapData = userTopics.map((t) => ({
@@ -233,11 +249,12 @@ export async function POST(request: Request) {
     }
     const planItems = normalizePlanItems(rawPlanItems && Array.isArray(rawPlanItems) && rawPlanItems.length > 0 ? rawPlanItems : gapData)
 
-    // Save plan to Supabase
+    // Save plan to Supabase linked to material
     const { data: plan, error } = await supabase
       .from('revision_plans')
       .insert({
         user_id: user.id,
+        material_id: materialId || null,
         gap_report_ids: gapReportIds,
         title: `Revision Plan (${availableHours}h Budget) - ${new Date().toLocaleDateString()}`,
         available_hours: availableHours,
@@ -265,7 +282,7 @@ export async function POST(request: Request) {
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const supabase = await createServerSupabaseClient()
     const {
@@ -276,18 +293,41 @@ export async function GET() {
       return NextResponse.json({ error: 'Unauthorized. Please sign in.' }, { status: 401 })
     }
 
-    let { data: plans, error } = await supabase
+    const { searchParams } = new URL(request.url)
+    let materialId = searchParams.get('materialId')
+
+    if (!materialId) {
+      const { data: latestMat } = await supabase
+        .from('materials')
+        .select('id')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      if (latestMat) {
+        materialId = latestMat.id
+      }
+    }
+
+    let query = supabase
       .from('revision_plans')
       .select('*')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
+
+    if (materialId && materialId !== 'all') {
+      query = query.eq('material_id', materialId)
+    }
+
+    let { data: plans, error } = await query
 
     if (error) {
       console.error('Revision plans fetch error:', error)
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
 
-    // Auto-create initial plan if user has none, so the screen is never blank
+    // Auto-create initial plan if user has none for this material, so the screen is never blank
     if (!plans || plans.length === 0) {
       try {
         const defaultItems = normalizePlanItems([])
@@ -295,6 +335,7 @@ export async function GET() {
           .from('revision_plans')
           .insert({
             user_id: user.id,
+            material_id: materialId || null,
             title: `Priority Revision Plan (8h Budget)`,
             available_hours: 8,
             plan_data: defaultItems,

@@ -34,6 +34,8 @@ const SUGGESTED_QUERIES = [
   'How does the Banker\'s Algorithm determine if a state is safe?',
 ]
 
+import MaterialContextSelector, { MaterialOption } from '@/components/MaterialContextSelector'
+
 export default function AssistantPage() {
   return (
     <Suspense fallback={<div className="p-12 text-center text-sm text-gray-400">Loading AI Assistant...</div>}>
@@ -45,6 +47,11 @@ export default function AssistantPage() {
 function AssistantContent() {
   const searchParams = useSearchParams()
   const initialQuery = searchParams.get('query')
+  const urlMaterialId = searchParams.get('materialId')
+
+  const [materials, setMaterials] = useState<MaterialOption[]>([])
+  const [activeMaterialId, setActiveMaterialId] = useState<string | null>(urlMaterialId)
+  const [activeMaterialTitle, setActiveMaterialTitle] = useState<string | null>(null)
 
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
@@ -57,6 +64,40 @@ function AssistantContent() {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const chatBottomRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    async function loadMaterials() {
+      try {
+        const storedId = typeof window !== 'undefined' ? localStorage.getItem('gapfinder_active_material_id') : null
+        const res = await fetch('/api/materials')
+        if (res.ok) {
+          const data = await res.json()
+          const list: MaterialOption[] = data.materials || []
+          setMaterials(list)
+          const resolved = urlMaterialId || storedId || (list.length > 0 ? list[0].id : null)
+          setActiveMaterialId(resolved)
+          const mat = list.find((m) => m.id === resolved)
+          if (mat) setActiveMaterialTitle(mat.title)
+        }
+      } catch (err) {
+        console.error('Error loading materials for assistant:', err)
+      }
+    }
+    loadMaterials()
+  }, [urlMaterialId])
+
+  const handleMaterialChange = (matId: string) => {
+    setActiveMaterialId(matId)
+    if (typeof window !== 'undefined') {
+      if (matId === 'all') {
+        localStorage.removeItem('gapfinder_active_material_id')
+      } else {
+        localStorage.setItem('gapfinder_active_material_id', matId)
+      }
+    }
+    const mat = materials.find((m) => m.id === matId)
+    setActiveMaterialTitle(mat ? mat.title : null)
+  }
 
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -94,6 +135,7 @@ function AssistantContent() {
         body: JSON.stringify({
           message: text,
           chatHistory: historyPayload,
+          materialId: activeMaterialId,
         }),
       })
 
@@ -112,17 +154,18 @@ function AssistantContent() {
           {
             id: (Date.now() + 1).toString(),
             role: 'assistant',
-            content: `Error: ${data.error || 'Failed to retrieve answer.'}`,
+            content: `⚠️ ${data.error || 'Unable to retrieve answer from your study materials.'}`,
           },
         ])
       }
-    } catch {
+    } catch (err) {
+      console.error('Chat error:', err)
       setMessages((prev) => [
         ...prev,
         {
           id: (Date.now() + 1).toString(),
           role: 'assistant',
-          content: 'Network error. Please ensure your Supabase connection and Gemini API key are active.',
+          content: '⚠️ Network error communicating with grounded assistant.',
         },
       ])
     } finally {
@@ -133,7 +176,20 @@ function AssistantContent() {
   return (
     <AppLayout
       headerTitle="Explain-This-Topic Assistant"
-      headerSubtitle="Grounded AI tutor answering strictly from your uploaded course notes with source citations"
+      headerSubtitle={
+        activeMaterialTitle
+          ? `Grounded Q&A answering strictly from: ${activeMaterialTitle}`
+          : 'Grounded AI tutor answering strictly from your uploaded course notes with source citations'
+      }
+      actionButton={
+        materials.length > 0 ? (
+          <MaterialContextSelector
+            materials={materials}
+            activeMaterialId={activeMaterialId}
+            onSelectMaterial={handleMaterialChange}
+          />
+        ) : undefined
+      }
     >
       <div className="max-w-4xl mx-auto flex-1 flex flex-col h-[calc(100dvh-270px)] min-h-[380px]">
         {/* RAG Verification Disclaimer */}

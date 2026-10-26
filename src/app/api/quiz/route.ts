@@ -3,6 +3,8 @@ import { NextResponse } from 'next/server'
 import { generateQuestions } from '@/lib/rag'
 import { generateEmbedding } from '@/lib/gemini'
 
+export const maxDuration = 60
+
 export async function POST(request: Request) {
   try {
     const supabase = await createServerSupabaseClient()
@@ -12,7 +14,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { topicIds, questionsPerTopic = 3, difficulty = 'mixed' } = await request.json()
+    const {
+      topicIds,
+      materialId: requestedMaterialId,
+      questionsPerTopic = 3,
+      difficulty = 'mixed',
+    } = await request.json()
 
     if (!topicIds || topicIds.length === 0) {
       return NextResponse.json({ error: 'No topics selected' }, { status: 400 })
@@ -28,12 +35,19 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Topics not found' }, { status: 404 })
     }
 
-    // Create quiz
+    // Resolve material_id
+    const resolvedMaterialId =
+      requestedMaterialId ||
+      topics.find((t) => t.material_id)?.material_id ||
+      null
+
+    // Create quiz linked to material
     const totalQuestions = topics.length * questionsPerTopic
     const { data: quiz, error: quizError } = await supabase
       .from('quizzes')
       .insert({
         user_id: user.id,
+        material_id: resolvedMaterialId,
         title: `Diagnostic Quiz - ${new Date().toLocaleDateString()}`,
         topic_ids: topicIds,
         total_questions: totalQuestions,
@@ -43,26 +57,35 @@ export async function POST(request: Request) {
       .single()
 
     if (quizError) {
+      console.error('Quiz creation DB error:', quizError)
       return NextResponse.json({ error: 'Failed to create quiz' }, { status: 500 })
     }
 
-    // Generate questions for each topic using RAG
+    // Generate questions for each topic using material-scoped RAG
     let questionIndex = 0
     for (const topic of topics) {
-      // Retrieve relevant chunks via vector search
+      const topicMaterial = topic.material_id || resolvedMaterialId
+
+      // Retrieve relevant chunks via vector search restricted to this material
       const embedding = await generateEmbedding(topic.name + ' ' + (topic.description || ''))
 
-      const { data: chunks } = await supabase.rpc('match_chunks', {
+      const rpcParams: any = {
         query_embedding: embedding,
         match_user_id: user.id,
         match_count: 8,
-        match_threshold: 0.3,
-      })
+        match_threshold: 0.25,
+      }
+      if (topicMaterial) {
+        rpcParams.match_material_id = topicMaterial
+      }
 
-      const context = chunks?.map((c: { content: string }) => c.content).join('\n\n') || ''
+      const { data: chunks } = await supabase.rpc('match_chunks', rpcParams)
 
-      if (!context) {
-        continue
+      let context = chunks?.map((c: { content: string }) => c.content).join('\n\n') || ''
+
+      // If no chunks matched or vector search was sparse, provide topic description context
+      if (!context || context.trim().length < 15) {
+        context = `Topic: ${topic.name}\nDescription: ${topic.description || 'Core concepts and techniques.'}\nKey study subject context.`
       }
 
       try {
@@ -85,8 +108,8 @@ export async function POST(request: Request) {
         console.error(`Error generating questions for topic ${topic.name}:`, qError)
       }
 
-      // Rate limiting
-      await new Promise(resolve => setTimeout(resolve, 500))
+      // Brief delay between topic chunks
+      await new Promise(resolve => setTimeout(resolve, 200))
     }
 
     // Update total questions count
@@ -102,7 +125,10 @@ export async function POST(request: Request) {
       .eq('quiz_id', quiz.id)
       .order('order_index', { ascending: true })
 
-    return NextResponse.json({ quiz: { ...quiz, total_questions: questionIndex }, questions: allQuestions })
+    return NextResponse.json({
+      quiz: { ...quiz, total_questions: questionIndex, material_id: resolvedMaterialId },
+      questions: allQuestions || [],
+    })
   } catch (error) {
     console.error('Quiz generation error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
@@ -120,6 +146,7 @@ export async function GET(request: Request) {
 
     const { searchParams } = new URL(request.url)
     const quizId = searchParams.get('quizId')
+    const materialId = searchParams.get('materialId')
 
     if (quizId) {
       const { data: quiz } = await supabase
@@ -141,16 +168,26 @@ export async function GET(request: Request) {
         .eq('quiz_id', quizId)
         .eq('user_id', user.id)
 
-      return NextResponse.json({ quiz, questions, answers })
+      return NextResponse.json({ quiz, questions: questions || [], answers: answers || [] })
     }
 
-    const { data: quizzes } = await supabase
+    let query = supabase
       .from('quizzes')
       .select('*')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
 
-    return NextResponse.json({ quizzes })
+    if (materialId && materialId !== 'all') {
+      query = query.eq('material_id', materialId)
+    }
+
+    const { data: quizzes, error } = await query
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 })
+    }
+
+    return NextResponse.json({ quizzes: quizzes || [] })
   } catch (error) {
     console.error('Quiz fetch error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })

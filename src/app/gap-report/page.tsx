@@ -31,6 +31,8 @@ interface GapReportItem {
   created_at: string
 }
 
+import MaterialContextSelector, { MaterialOption } from '@/components/MaterialContextSelector'
+
 export default function GapReportPage() {
   return (
     <Suspense fallback={<div className="p-12 text-center text-sm text-gray-400">Loading gap analysis...</div>}>
@@ -43,22 +45,52 @@ function GapReportContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const quizIdFilter = searchParams.get('quizId')
+  const urlMaterialId = searchParams.get('materialId')
 
   const [reports, setReports] = useState<GapReportItem[]>([])
+  const [materials, setMaterials] = useState<MaterialOption[]>([])
+  const [activeMaterialId, setActiveMaterialId] = useState<string | null>(urlMaterialId)
+  const [activeMaterialTitle, setActiveMaterialTitle] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<'all' | 'weak' | 'medium' | 'strong'>('all')
   const [availableHours, setAvailableHours] = useState(8)
   const [generatingPlan, setGeneratingPlan] = useState(false)
   const [planError, setPlanError] = useState<string | null>(null)
 
-  const fetchReports = async () => {
+  const fetchReportsAndMaterials = async (targetId?: string | null) => {
     try {
       setLoading(true)
-      const url = quizIdFilter ? `/api/gap-analysis?quizId=${quizIdFilter}` : '/api/gap-analysis'
-      const res = await fetch(url)
-      if (res.ok) {
-        const data = await res.json()
+      const storedId = typeof window !== 'undefined' ? localStorage.getItem('gapfinder_active_material_id') : null
+      const effectiveMatId = targetId !== undefined ? targetId : (urlMaterialId || activeMaterialId || storedId)
+
+      const queryParams = new URLSearchParams()
+      if (quizIdFilter) queryParams.set('quizId', quizIdFilter)
+      if (effectiveMatId && effectiveMatId !== 'all') queryParams.set('materialId', effectiveMatId)
+
+      const [matRes, reportsRes] = await Promise.all([
+        fetch('/api/materials'),
+        fetch(`/api/gap-analysis?${queryParams.toString()}`),
+      ])
+
+      let matList: MaterialOption[] = []
+      if (matRes.ok) {
+        const matData = await matRes.json()
+        matList = matData.materials || []
+        setMaterials(matList)
+      }
+
+      if (reportsRes.ok) {
+        const data = await reportsRes.json()
         setReports(data.reports || [])
+        const currentMatId = data.activeMaterialId || effectiveMatId || (matList.length > 0 ? matList[0].id : null)
+        setActiveMaterialId(currentMatId)
+        if (currentMatId && typeof window !== 'undefined') {
+          localStorage.setItem('gapfinder_active_material_id', currentMatId)
+        }
+        const currentMat = matList.find((m) => m.id === currentMatId)
+        if (currentMat) {
+          setActiveMaterialTitle(currentMat.title)
+        }
       }
     } catch (err) {
       console.error('Error fetching gap reports:', err)
@@ -68,8 +100,30 @@ function GapReportContent() {
   }
 
   useEffect(() => {
-    fetchReports()
-  }, [quizIdFilter])
+    fetchReportsAndMaterials(urlMaterialId)
+  }, [quizIdFilter, urlMaterialId])
+
+  const handleMaterialChange = (matId: string) => {
+    // Clear previous material's reports immediately to prevent stale report viewing
+    setReports([])
+    setActiveMaterialId(matId)
+    if (typeof window !== 'undefined') {
+      if (matId === 'all') {
+        localStorage.removeItem('gapfinder_active_material_id')
+      } else {
+        localStorage.setItem('gapfinder_active_material_id', matId)
+      }
+      const url = new URL(window.location.href)
+      if (matId === 'all') {
+        url.searchParams.delete('materialId')
+      } else {
+        url.searchParams.set('materialId', matId)
+      }
+      url.searchParams.delete('quizId')
+      window.history.replaceState({}, '', url.toString())
+    }
+    fetchReportsAndMaterials(matId)
+  }
 
   const handleGenerateRevisionPlan = async () => {
     try {
@@ -78,10 +132,13 @@ function GapReportContent() {
       const res = await fetch('/api/plan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ availableHours }),
+        body: JSON.stringify({
+          availableHours,
+          materialId: activeMaterialId,
+        }),
       })
       if (res.ok) {
-        router.push('/revision-plan')
+        router.push(activeMaterialId ? `/revision-plan?materialId=${encodeURIComponent(activeMaterialId)}` : '/revision-plan')
       } else {
         const errData = await res.json().catch(() => ({}))
         setPlanError(errData.error || 'Failed to generate revision plan. Please try again.')
@@ -106,10 +163,24 @@ function GapReportContent() {
   return (
     <AppLayout
       headerTitle="Curriculum Gap Diagnosis"
-      headerSubtitle="Topic-level breakdown of your strengths, conceptual blindspots, and recommended remediation"
+      headerSubtitle={
+        activeMaterialTitle
+          ? `Topic-level diagnosis for: ${activeMaterialTitle}`
+          : 'Topic-level breakdown of your strengths, conceptual blindspots, and recommended remediation'
+      }
       actionButton={
-        <div className="flex items-center gap-2">
-          <Link href="/quiz" className="btn-secondary text-xs py-2 px-3 flex items-center gap-1.5">
+        <div className="flex items-center flex-wrap gap-2">
+          {materials.length > 0 && (
+            <MaterialContextSelector
+              materials={materials}
+              activeMaterialId={activeMaterialId}
+              onSelectMaterial={handleMaterialChange}
+            />
+          )}
+          <Link
+            href={activeMaterialId && activeMaterialId !== 'all' ? `/quiz?materialId=${activeMaterialId}` : '/quiz'}
+            className="btn-secondary text-xs py-2 px-3 flex items-center gap-1.5"
+          >
             <LuBrain size={14} />
             <span>Retake Diagnostic Quiz</span>
           </Link>
@@ -217,14 +288,23 @@ function GapReportContent() {
           <div className="glass p-12 text-center space-y-4">
             <LuChartBar className="mx-auto text-gray-500" size={48} />
             <div>
-              <h3 className="text-base font-bold text-white">No Diagnostic Reports Found</h3>
+              <h3 className="text-base font-bold text-white">
+                {activeMaterialTitle
+                  ? `No Diagnostic Reports for "${activeMaterialTitle}"`
+                  : 'No Diagnostic Reports Found'}
+              </h3>
               <p className="text-xs mt-1 max-w-md mx-auto" style={{ color: 'var(--text-secondary)' }}>
-                Take a diagnostic quiz to generate your first knowledge gap diagnosis, or preload sample course data.
+                {activeMaterialTitle
+                  ? 'Launch a diagnostic assessment for this study material to diagnose weaknesses, identify blindspots, and calculate topic accuracy.'
+                  : 'Take a diagnostic quiz to generate your first knowledge gap diagnosis, or preload sample course data.'}
               </p>
             </div>
             <div className="flex justify-center gap-3">
-              <Link href="/quiz" className="btn-primary text-xs py-2 px-4">
-                Take Diagnostic Quiz
+              <Link
+                href={activeMaterialId && activeMaterialId !== 'all' ? `/quiz?materialId=${activeMaterialId}` : '/quiz'}
+                className="btn-primary text-xs py-2 px-4"
+              >
+                {activeMaterialTitle ? `Diagnose ${activeMaterialTitle}` : 'Take Diagnostic Quiz'}
               </Link>
               <Link href="/dashboard" className="btn-secondary text-xs py-2 px-4">
                 Preload Demo Course

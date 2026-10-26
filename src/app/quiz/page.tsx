@@ -42,6 +42,8 @@ interface QuizSession {
   total_questions: number
 }
 
+import MaterialContextSelector, { MaterialOption } from '@/components/MaterialContextSelector'
+
 export default function DiagnosticQuizPage() {
   return (
     <Suspense fallback={<div className="p-12 text-center text-sm text-gray-400">Loading diagnostic quiz...</div>}>
@@ -54,8 +56,12 @@ function DiagnosticQuizContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const preselectedTopicId = searchParams.get('topicId')
+  const urlMaterialId = searchParams.get('materialId')
 
   const [topics, setTopics] = useState<Topic[]>([])
+  const [materials, setMaterials] = useState<MaterialOption[]>([])
+  const [activeMaterialId, setActiveMaterialId] = useState<string | null>(urlMaterialId)
+  const [activeMaterialTitle, setActiveMaterialTitle] = useState<string | null>(null)
   const [selectedTopicIds, setSelectedTopicIds] = useState<string[]>([])
   const [questionsPerTopic, setQuestionsPerTopic] = useState(2)
   const [difficulty, setDifficulty] = useState<'easy' | 'medium' | 'hard' | 'mixed'>('mixed')
@@ -72,31 +78,71 @@ function DiagnosticQuizContent() {
   const [evaluatingDiagnosis, setEvaluatingDiagnosis] = useState(false)
   const [startTime, setStartTime] = useState<number>(Date.now())
 
-  useEffect(() => {
-    async function loadTopics() {
-      try {
-        setLoadingTopics(true)
-        const res = await fetch('/api/topics')
-        if (res.ok) {
-          const data = await res.json()
-          const topicList: Topic[] = data.topics || []
-          setTopics(topicList)
+  const loadTopics = async (targetMaterialId?: string | null) => {
+    try {
+      setLoadingTopics(true)
+      const storedId = typeof window !== 'undefined' ? localStorage.getItem('gapfinder_active_material_id') : null
+      const effectiveId = targetMaterialId !== undefined ? targetMaterialId : (urlMaterialId || activeMaterialId || storedId)
 
-          if (preselectedTopicId) {
-            setSelectedTopicIds([preselectedTopicId])
-          } else if (topicList.length > 0) {
-            // Select all topics by default for a thorough check
-            setSelectedTopicIds(topicList.map((t) => t.id))
-          }
-        }
-      } catch (err) {
-        console.error('Failed to load topics:', err)
-      } finally {
-        setLoadingTopics(false)
+      const [matRes, topicsRes] = await Promise.all([
+        fetch('/api/materials'),
+        fetch(`/api/topics${effectiveId ? `?materialId=${encodeURIComponent(effectiveId)}` : ''}`),
+      ])
+
+      let matList: MaterialOption[] = []
+      if (matRes.ok) {
+        const matData = await matRes.json()
+        matList = matData.materials || []
+        setMaterials(matList)
       }
+
+      if (topicsRes.ok) {
+        const data = await topicsRes.json()
+        const topicList: Topic[] = data.topics || []
+        setTopics(topicList)
+
+        const resolvedMatId = data.activeMaterialId || effectiveId || (matList.length > 0 ? matList[0].id : null)
+        setActiveMaterialId(resolvedMatId)
+        if (resolvedMatId && typeof window !== 'undefined') {
+          localStorage.setItem('gapfinder_active_material_id', resolvedMatId)
+        }
+        const activeMat = matList.find((m) => m.id === resolvedMatId)
+        if (activeMat) {
+          setActiveMaterialTitle(activeMat.title)
+        }
+
+        if (preselectedTopicId && topicList.some((t) => t.id === preselectedTopicId)) {
+          setSelectedTopicIds([preselectedTopicId])
+        } else if (topicList.length > 0) {
+          setSelectedTopicIds(topicList.map((t) => t.id))
+        } else {
+          setSelectedTopicIds([])
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load topics:', err)
+    } finally {
+      setLoadingTopics(false)
     }
-    loadTopics()
-  }, [preselectedTopicId])
+  }
+
+  useEffect(() => {
+    loadTopics(urlMaterialId)
+  }, [preselectedTopicId, urlMaterialId])
+
+  const handleMaterialChange = (newMatId: string) => {
+    setTopics([])
+    setSelectedTopicIds([])
+    setActiveMaterialId(newMatId)
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('gapfinder_active_material_id', newMatId)
+      const url = new URL(window.location.href)
+      url.searchParams.set('materialId', newMatId)
+      url.searchParams.delete('topicId')
+      window.history.replaceState({}, '', url.toString())
+    }
+    loadTopics(newMatId)
+  }
 
   const toggleTopicSelection = (id: string) => {
     setSelectedTopicIds((prev) =>
@@ -115,6 +161,7 @@ function DiagnosticQuizContent() {
           topicIds: selectedTopicIds,
           questionsPerTopic,
           difficulty,
+          materialId: activeMaterialId,
         }),
       })
 
@@ -188,14 +235,17 @@ function DiagnosticQuizContent() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ quizId: quiz.id }),
         })
+        const queryParams = new URLSearchParams()
+        queryParams.set('quizId', quiz.id)
+        if (activeMaterialId) queryParams.set('materialId', activeMaterialId)
         if (res.ok) {
-          router.push(`/gap-report?quizId=${quiz.id}`)
+          router.push(`/gap-report?${queryParams.toString()}`)
         } else {
-          router.push('/gap-report')
+          router.push(activeMaterialId ? `/gap-report?materialId=${encodeURIComponent(activeMaterialId)}` : '/gap-report')
         }
       } catch (err) {
         console.error('Error triggering diagnosis:', err)
-        router.push('/gap-report')
+        router.push(activeMaterialId ? `/gap-report?materialId=${encodeURIComponent(activeMaterialId)}` : '/gap-report')
       }
     }
   }
@@ -206,7 +256,20 @@ function DiagnosticQuizContent() {
   return (
     <AppLayout
       headerTitle="Diagnostic Assessment"
-      headerSubtitle="Questions generated strictly from your uploaded materials with grounded citations"
+      headerSubtitle={
+        activeMaterialTitle
+          ? `Assessment for: ${activeMaterialTitle}`
+          : 'Questions generated strictly from your uploaded materials with grounded citations'
+      }
+      actionButton={
+        !quiz && materials.length > 0 ? (
+          <MaterialContextSelector
+            materials={materials}
+            activeMaterialId={activeMaterialId}
+            onSelectMaterial={handleMaterialChange}
+          />
+        ) : undefined
+      }
     >
       <div className="max-w-4xl mx-auto pb-12">
         {/* State 1: Configuration / Topic Selection */}

@@ -134,7 +134,7 @@ export async function POST(request: Request) {
       )
     }
 
-    // Create material record
+    // Create material record with initial 'processing' status
     const { data: material, error: materialError } = await supabase
       .from('materials')
       .insert({
@@ -144,7 +144,8 @@ export async function POST(request: Request) {
         file_name: fileName,
         file_url: fileUrl,
         raw_text: textContent,
-        status: 'ready',
+        status: 'processing',
+        error_message: null,
       })
       .select()
       .single()
@@ -157,94 +158,132 @@ export async function POST(request: Request) {
       )
     }
 
-    // Process chunking, embeddings, and topics in background (non-blocking)
-    processInBackground(supabase, user.id, material.id, textContent, type).catch((bgErr) =>
-      console.error('Background processing error:', bgErr)
-    )
+    // Process chunking, embeddings, and topic extraction synchronously with 60s timeout protection
+    let topicsCount = 0
+    let chunksCount = 0
+    try {
+      const result = await processMaterial(supabase, user.id, material.id, textContent, type)
+      topicsCount = result.topicsCount
+      chunksCount = result.chunksCount
 
-    return NextResponse.json({ material })
+      await supabase
+        .from('materials')
+        .update({ status: 'ready', error_message: null })
+        .eq('id', material.id)
+    } catch (procErr: any) {
+      console.error('Material processing error:', procErr)
+      await supabase
+        .from('materials')
+        .update({
+          status: 'failed',
+          error_message: procErr?.message || 'Failed during text chunking or topic extraction',
+        })
+        .eq('id', material.id)
+
+      return NextResponse.json(
+        { error: `Processing error: ${procErr?.message || 'Could not process material'}` },
+        { status: 500 }
+      )
+    }
+
+    // Refetch the updated material record
+    const { data: updatedMaterial } = await supabase
+      .from('materials')
+      .select('*')
+      .eq('id', material.id)
+      .single()
+
+    return NextResponse.json({
+      material: updatedMaterial || { ...material, status: 'ready' },
+      topicsCount,
+      chunksCount,
+    })
   } catch (error: any) {
     console.error('Material upload error:', error)
     return NextResponse.json({ error: error?.message || 'Internal server error' }, { status: 500 })
   }
 }
 
-async function processInBackground(
+async function processMaterial(
   supabase: any,
   userId: string,
   materialId: string,
   text: string,
   type: string
-) {
+): Promise<{ chunksCount: number; topicsCount: number }> {
+  // 1. Chunk the text
+  const chunks = chunkText(text)
+  let chunksCount = 0
+
+  // 2. Generate embeddings and store chunks in parallel batches of 4
+  const BATCH_SIZE = 4
+  for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
+    const batch = chunks.slice(i, i + BATCH_SIZE)
+    await Promise.all(
+      batch.map(async (chunk, batchIdx) => {
+        const chunkIdx = i + batchIdx
+        try {
+          const embedding = await generateEmbedding(chunk)
+          await supabase.from('material_chunks').insert({
+            material_id: materialId,
+            user_id: userId,
+            content: sanitizeText(chunk),
+            chunk_index: chunkIdx,
+            embedding,
+            metadata: { type, chunk_length: chunk.length },
+          })
+          chunksCount++
+        } catch (embError) {
+          console.error(`Error processing chunk ${chunkIdx}:`, embError)
+        }
+      })
+    )
+  }
+
+  // 3. Extract topics specifically for this material (regardless of type: syllabus, notes, textbook)
+  let topicsCount = 0
   try {
-    // 1. Chunk the text
-    const chunks = chunkText(text)
+    const topics = await extractTopics(text)
 
-    // 2. Generate embeddings and store chunks in fast parallel batches of 4
-    const BATCH_SIZE = 4
-    for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
-      const batch = chunks.slice(i, i + BATCH_SIZE)
-      await Promise.all(
-        batch.map(async (chunk, batchIdx) => {
-          const chunkIdx = i + batchIdx
-          try {
-            const embedding = await generateEmbedding(chunk)
-            await supabase.from('material_chunks').insert({
-              material_id: materialId,
-              user_id: userId,
-              content: sanitizeText(chunk),
-              chunk_index: chunkIdx,
-              embedding,
-              metadata: { type, chunk_length: chunk.length },
-            })
-          } catch (embError) {
-            console.error(`Error processing chunk ${chunkIdx}:`, embError)
-          }
+    for (let i = 0; i < topics.length; i++) {
+      const { data: parentTopic } = await supabase
+        .from('topics')
+        .insert({
+          user_id: userId,
+          material_id: materialId,
+          name: topics[i].name,
+          description: topics[i].description,
+          order_index: i,
+          strength: 'untested',
+          score: 0,
         })
-      )
-    }
+        .select()
+        .single()
 
-    // 3. Extract topics if this is a syllabus
-    if (type === 'syllabus') {
-      try {
-        const topics = await extractTopics(text)
-
-        for (let i = 0; i < topics.length; i++) {
-          const { data: parentTopic } = await supabase
-            .from('topics')
-            .insert({
+      if (parentTopic) {
+        topicsCount++
+        if (topics[i].subtopics && topics[i].subtopics.length > 0) {
+          for (let j = 0; j < topics[i].subtopics.length; j++) {
+            await supabase.from('topics').insert({
               user_id: userId,
               material_id: materialId,
-              name: topics[i].name,
-              description: topics[i].description,
-              order_index: i,
+              name: topics[i].subtopics[j].name,
+              description: topics[i].subtopics[j].description,
+              parent_topic_id: parentTopic.id,
+              order_index: j,
+              strength: 'untested',
+              score: 0,
             })
-            .select()
-            .single()
-
-          if (parentTopic && topics[i].subtopics) {
-            for (let j = 0; j < topics[i].subtopics.length; j++) {
-              await supabase.from('topics').insert({
-                user_id: userId,
-                material_id: materialId,
-                name: topics[i].subtopics[j].name,
-                description: topics[i].subtopics[j].description,
-                parent_topic_id: parentTopic.id,
-                order_index: j,
-              })
-            }
+            topicsCount++
           }
         }
-      } catch (topicError) {
-        console.error('Topic extraction error:', topicError)
       }
     }
-
-    // 4. Update material status
-    await supabase.from('materials').update({ status: 'ready' }).eq('id', materialId)
-  } catch (error) {
-    console.error('Background processing exception:', error)
+  } catch (topicError) {
+    console.error('Topic extraction error:', topicError)
   }
+
+  return { chunksCount, topicsCount }
 }
 
 export async function GET() {
@@ -268,7 +307,7 @@ export async function GET() {
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
 
-    return NextResponse.json({ materials })
+    return NextResponse.json({ materials: materials || [] })
   } catch (error) {
     console.error('Materials fetch error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
@@ -287,6 +326,30 @@ export async function DELETE(request: Request) {
     }
 
     const { id } = await request.json()
+    if (!id) {
+      return NextResponse.json({ error: 'Material id is required' }, { status: 400 })
+    }
+
+    // Verify ownership
+    const { data: material } = await supabase
+      .from('materials')
+      .select('id')
+      .eq('id', id)
+      .eq('user_id', user.id)
+      .single()
+
+    if (!material) {
+      return NextResponse.json({ error: 'Material not found or access denied' }, { status: 404 })
+    }
+
+    // Clean up dependent resources for this material
+    await Promise.all([
+      supabase.from('material_chunks').delete().eq('material_id', id).eq('user_id', user.id),
+      supabase.from('topics').delete().eq('material_id', id).eq('user_id', user.id),
+      supabase.from('gap_reports').delete().eq('material_id', id).eq('user_id', user.id),
+      supabase.from('quizzes').delete().eq('material_id', id).eq('user_id', user.id),
+      supabase.from('revision_plans').delete().eq('material_id', id).eq('user_id', user.id),
+    ])
 
     const { error } = await supabase
       .from('materials')

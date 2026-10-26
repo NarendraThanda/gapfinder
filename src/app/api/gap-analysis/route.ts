@@ -13,7 +13,7 @@ export async function POST(request: Request) {
 
     const { quizId } = await request.json()
 
-    // Fetch quiz data
+    // Fetch quiz data with material_id
     const { data: quiz } = await supabase
       .from('quizzes')
       .select('*')
@@ -43,20 +43,24 @@ export async function POST(request: Request) {
 
     // Group results by topic
     const topicResults: Record<string, { topic_name: string; total: number; correct: number; questions: string[] }> = {}
+    const topicMaterialMap: Record<string, string | null> = {}
 
     for (const question of questions) {
       const answer = answers.find(a => a.question_id === question.id)
       const topicId = question.topic_id || 'unknown'
 
-      // Get topic name
+      // Get topic name and material_id
       let topicName = 'General'
       if (question.topic_id) {
         const { data: topic } = await supabase
           .from('topics')
-          .select('name')
+          .select('name, material_id')
           .eq('id', question.topic_id)
           .single()
         topicName = topic?.name || 'General'
+        if (topic?.material_id) {
+          topicMaterialMap[topicId] = topic.material_id
+        }
       }
 
       if (!topicResults[topicId]) {
@@ -83,13 +87,16 @@ export async function POST(request: Request) {
       )
 
       if (topicId && topicId !== 'unknown') {
-        // Save gap report
+        const resolvedMaterialId = quiz.material_id || topicMaterialMap[topicId] || null
+
+        // Save gap report linked directly to material
         const { data: report } = await supabase
           .from('gap_reports')
           .insert({
             user_id: user.id,
             quiz_id: quizId,
             topic_id: topicId,
+            material_id: resolvedMaterialId,
             topic_name: gap.topic_name,
             strength: gap.strength,
             score: gap.score,
@@ -139,6 +146,37 @@ export async function GET(request: Request) {
 
     const { searchParams } = new URL(request.url)
     const quizId = searchParams.get('quizId')
+    let materialId = searchParams.get('materialId')
+
+    // If quizId is provided, fetch specifically for that quiz
+    if (quizId) {
+      const { data: reports, error } = await supabase
+        .from('gap_reports')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('quiz_id', quizId)
+        .order('created_at', { ascending: false })
+
+      if (error) {
+        return NextResponse.json({ error: error.message }, { status: 500 })
+      }
+      return NextResponse.json({ reports: reports || [] })
+    }
+
+    // If no materialId provided and not 'all', default to latest material
+    if (!materialId) {
+      const { data: latestMat } = await supabase
+        .from('materials')
+        .select('id')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      if (latestMat) {
+        materialId = latestMat.id
+      }
+    }
 
     let query = supabase
       .from('gap_reports')
@@ -146,8 +184,8 @@ export async function GET(request: Request) {
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
 
-    if (quizId) {
-      query = query.eq('quiz_id', quizId)
+    if (materialId && materialId !== 'all') {
+      query = query.eq('material_id', materialId)
     }
 
     const { data: reports, error } = await query
@@ -156,7 +194,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
 
-    return NextResponse.json({ reports })
+    return NextResponse.json({ reports: reports || [], materialId: materialId || null })
   } catch (error) {
     console.error('Gap reports fetch error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })

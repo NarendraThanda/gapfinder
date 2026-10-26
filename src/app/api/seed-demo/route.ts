@@ -122,6 +122,7 @@ export async function POST() {
       .from('quizzes')
       .insert({
         user_id: user.id,
+        material_id: syllabusMaterial?.id,
         title: 'Diagnostic Quiz: Midterm Readiness Assessment',
         topic_ids: insertedParentTopics.map(t => t.id),
         total_questions: 4,
@@ -232,6 +233,7 @@ export async function POST() {
         await supabase.from('gap_reports').insert([
           {
             user_id: user.id,
+            material_id: syllabusMaterial?.id,
             quiz_id: sampleQuiz.id,
             topic_id: vmTopic.id,
             topic_name: vmTopic.name,
@@ -248,6 +250,7 @@ export async function POST() {
           },
           {
             user_id: user.id,
+            material_id: syllabusMaterial?.id,
             quiz_id: sampleQuiz.id,
             topic_id: deadlockTopic.id,
             topic_name: deadlockTopic.name,
@@ -263,6 +266,7 @@ export async function POST() {
           },
           {
             user_id: user.id,
+            material_id: syllabusMaterial?.id,
             quiz_id: sampleQuiz.id,
             topic_id: schedTopic.id,
             topic_name: schedTopic.name,
@@ -288,6 +292,7 @@ export async function POST() {
       // 6. Create Personalized Revision Plan
       await supabase.from('revision_plans').insert({
         user_id: user.id,
+        material_id: syllabusMaterial?.id,
         title: 'Priority Revision Plan: Exam Prep (8 Hours Budget)',
         available_hours: 8,
         status: 'active',
@@ -335,6 +340,7 @@ export async function POST() {
 
     return NextResponse.json({
       success: true,
+      syllabus: syllabusMaterial,
       message: 'Sample syllabus, notes, topic structure, quiz diagnosis, and revision plan seeded successfully!',
     })
   } catch (error) {

@@ -12,21 +12,26 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { message, chatHistory = [] } = await request.json()
+    const { message, chatHistory = [], materialId } = await request.json()
 
     if (!message) {
       return NextResponse.json({ error: 'No message provided' }, { status: 400 })
     }
 
-    // Retrieve relevant chunks via vector search
+    // Retrieve relevant chunks via vector search scoped to selected material
     const embedding = await generateEmbedding(message)
 
-    const { data: chunks } = await supabase.rpc('match_chunks', {
+    const rpcParams: any = {
       query_embedding: embedding,
       match_user_id: user.id,
       match_count: 8,
       match_threshold: 0.3,
-    })
+    }
+    if (materialId && materialId !== 'all') {
+      rpcParams.match_material_id = materialId
+    }
+
+    const { data: chunks } = await supabase.rpc('match_chunks', rpcParams)
 
     const context = chunks?.map((c: { content: string }) => c.content).join('\n\n') || ''
 
