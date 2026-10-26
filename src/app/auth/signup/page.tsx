@@ -103,11 +103,12 @@ export default function SignUpPage() {
               <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>
                 Full Name
               </label>
-              <div className="relative">
-                <LuUser className="absolute left-4 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} size={18} />
+              <div className="relative flex items-center">
+                <LuUser className="absolute left-4 pointer-events-none z-10" style={{ color: 'var(--text-muted)' }} size={18} />
                 <input
                   type="text"
                   className="input-glass pl-12"
+                  style={{ paddingLeft: '3rem' }}
                   placeholder="Alex Morgan"
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
@@ -121,11 +122,12 @@ export default function SignUpPage() {
               <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>
                 Email
               </label>
-              <div className="relative">
-                <LuMail className="absolute left-4 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} size={18} />
+              <div className="relative flex items-center">
+                <LuMail className="absolute left-4 pointer-events-none z-10" style={{ color: 'var(--text-muted)' }} size={18} />
                 <input
                   type="email"
                   className="input-glass pl-12"
+                  style={{ paddingLeft: '3rem' }}
                   placeholder="alex@university.edu"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
@@ -139,11 +141,12 @@ export default function SignUpPage() {
               <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>
                 Password
               </label>
-              <div className="relative">
-                <LuLock className="absolute left-4 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} size={18} />
+              <div className="relative flex items-center">
+                <LuLock className="absolute left-4 pointer-events-none z-10" style={{ color: 'var(--text-muted)' }} size={18} />
                 <input
                   type={showPassword ? 'text' : 'password'}
                   className="input-glass pl-12 pr-12"
+                  style={{ paddingLeft: '3rem', paddingRight: '3rem' }}
                   placeholder="Min. 6 characters"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
@@ -154,8 +157,9 @@ export default function SignUpPage() {
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-4 top-1/2 -translate-y-1/2"
+                  className="absolute right-4 z-10 p-1"
                   style={{ color: 'var(--text-muted)' }}
+                  aria-label="Toggle password visibility"
                 >
                   {showPassword ? <LuEyeOff size={18} /> : <LuEye size={18} />}
                 </button>
