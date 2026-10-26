@@ -2,9 +2,27 @@ import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
 
 export async function GET(request: Request) {
-  const { searchParams, origin } = new URL(request.url)
-  const code = searchParams.get('code')
-  const next = searchParams.get('next') ?? '/dashboard'
+  const requestUrl = new URL(request.url)
+  const code = requestUrl.searchParams.get('code')
+  const next = requestUrl.searchParams.get('next') ?? '/dashboard'
+
+  // Determine the canonical public origin
+  // On Vercel, x-forwarded-host preserves the exact public domain the user visited (e.g. gapfinder-kappa.vercel.app)
+  // whereas requestUrl.origin can point to an internal ephemeral deployment URL that causes 404 DEPLOYMENT_NOT_FOUND.
+  const forwardedHost = request.headers.get('x-forwarded-host')
+  const forwardedProto = request.headers.get('x-forwarded-proto') ?? 'https'
+
+  let baseUrl: string
+  if (forwardedHost) {
+    baseUrl = `${forwardedProto}://${forwardedHost}`
+  } else if (process.env.NEXT_PUBLIC_SITE_URL) {
+    baseUrl = process.env.NEXT_PUBLIC_SITE_URL.replace(/\/$/, '')
+  } else {
+    baseUrl = 'https://gapfinder-kappa.vercel.app'
+  }
+
+  // Ensure target path is valid
+  const targetPath = next.startsWith('/') ? next : `/${next}`
 
   if (code) {
     try {
@@ -12,8 +30,7 @@ export async function GET(request: Request) {
       const { error } = await supabase.auth.exchangeCodeForSession(code)
 
       if (!error) {
-        // Successful verification -> redirect to destination
-        return NextResponse.redirect(`${origin}${next}`)
+        return NextResponse.redirect(`${baseUrl}${targetPath}`)
       }
 
       console.error('Auth code exchange error:', error.message)
@@ -22,6 +39,6 @@ export async function GET(request: Request) {
     }
   }
 
-  // If code was invalid or missing, redirect to login with notification
-  return NextResponse.redirect(`${origin}/auth/login?verified=true`)
+  // If code was invalid or exchange failed, safely return to login page
+  return NextResponse.redirect(`${baseUrl}/auth/login?error=confirmation_failed`)
 }
