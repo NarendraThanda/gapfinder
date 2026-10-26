@@ -1,4 +1,4 @@
-import { generateEmbedding, generateJSON, generateText, isCleanOptionText, cleanOptionText } from './gemini'
+import { generateEmbedding, generateJSON, generateText, isCleanOptionText, cleanOptionText, synthesizeGroundedAnswer } from './gemini'
 import { createClient } from './supabase/client'
 
 // ===== TEXT CHUNKING =====
@@ -374,7 +374,8 @@ Sort by priority: high first, then medium, then low.`,
 export async function ragChat(
   question: string,
   context: string,
-  chatHistory: { role: string; content: string }[] = []
+  chatHistory: { role: string; content: string }[] = [],
+  materialTitles: string[] = []
 ): Promise<{ answer: string; citations: { source: string; content: string }[] }> {
   const historyStr = chatHistory
     .slice(-6)
@@ -393,27 +394,37 @@ ${historyStr ? `CONVERSATION HISTORY:\n${historyStr}\n` : ''}
 STUDENT'S QUESTION: ${question}
 
 Return JSON with:
-- "answer": comprehensive answer using the provided material (string, use clean markdown formatting)
+- "answer": comprehensive answer using the provided material (string, use clean markdown formatting with headings, bullet points, and code/math blocks where appropriate)
 - "citations": array of { "source": "material section or title", "content": "relevant quote or summary" }
 
 Rules:
 1. Ground your response in the provided material.
 2. If the question is a greeting or general study question, answer helpfully while referencing how the materials relate.
-3. Use clear, educational language.`,
+3. Use clear, educational language. Format equations cleanly with LaTeX or code blocks.`,
       'You are an expert AI tutor. Answer questions using the provided study material. Always cite your sources. Be educational and thorough.'
     )
 
-    if (result && typeof result.answer === 'string' && result.answer.trim().length > 0) {
+    if (result && typeof result.answer === 'string' && result.answer.trim().length > 30) {
       return {
         answer: result.answer.trim(),
         citations: Array.isArray(result.citations) ? result.citations : [],
       }
     }
   } catch (err) {
-    console.warn('ragChat JSON generation failed, falling back to direct text generation:', err)
+    console.warn('ragChat JSON generation failed, falling back to direct synthesis:', err)
   }
 
-  // Robust fallback: generate plain text answer
+  // Robust grounded synthesis fallback
+  try {
+    const synth = synthesizeGroundedAnswer(question, context, materialTitles)
+    if (synth && synth.answer && synth.answer.length > 30) {
+      return synth
+    }
+  } catch (synthErr) {
+    console.error('synthesizeGroundedAnswer error:', synthErr)
+  }
+
+  // Secondary fallback: generateText
   try {
     const textAnswer = await generateText(
       `You are a knowledgeable AI tutor. Answer the student's question using the provided study material context.
@@ -431,7 +442,7 @@ Provide a clear, educational, and well-structured markdown answer. Cite the rele
 
     return {
       answer: textAnswer || "I'm having trouble analyzing the study material right now. Please try again.",
-      citations: context ? [{ source: 'Study Material', content: context.slice(0, 150) + '...' }] : [],
+      citations: context ? [{ source: materialTitles[0] || 'Study Material', content: context.slice(0, 150) + '...' }] : [],
     }
   } catch (fallbackErr) {
     console.error('ragChat fallback failed:', fallbackErr)

@@ -76,11 +76,24 @@ function AssistantContent() {
           setMaterials(list)
           const resolved = urlMaterialId || storedId || (list.length > 0 ? list[0].id : null)
           setActiveMaterialId(resolved)
-          const mat = list.find((m) => m.id === resolved)
-          if (mat) setActiveMaterialTitle(mat.title)
+          if (resolved === 'all') {
+            setActiveMaterialTitle('All Uploaded Materials')
+          } else {
+            const mat = list.find((m) => m.id === resolved)
+            if (mat) setActiveMaterialTitle(mat.title)
+          }
+
+          if (initialQuery) {
+            handleSendMessage(initialQuery, resolved)
+          }
+        } else if (initialQuery) {
+          handleSendMessage(initialQuery)
         }
       } catch (err) {
         console.error('Error loading materials for assistant:', err)
+        if (initialQuery) {
+          handleSendMessage(initialQuery)
+        }
       }
     }
     loadMaterials()
@@ -90,28 +103,28 @@ function AssistantContent() {
     setActiveMaterialId(matId)
     if (typeof window !== 'undefined') {
       if (matId === 'all') {
-        localStorage.removeItem('gapfinder_active_material_id')
+        localStorage.setItem('gapfinder_active_material_id', 'all')
       } else {
         localStorage.setItem('gapfinder_active_material_id', matId)
       }
     }
-    const mat = materials.find((m) => m.id === matId)
-    setActiveMaterialTitle(mat ? mat.title : null)
+    if (matId === 'all') {
+      setActiveMaterialTitle('All Uploaded Materials')
+    } else {
+      const mat = materials.find((m) => m.id === matId)
+      setActiveMaterialTitle(mat ? mat.title : null)
+    }
   }
 
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  useEffect(() => {
-    if (initialQuery) {
-      handleSendMessage(initialQuery)
-    }
-  }, [initialQuery])
-
-  const handleSendMessage = async (textToSend?: string) => {
+  const handleSendMessage = async (textToSend?: string, matIdOverride?: string | null) => {
     const text = (textToSend || input).trim()
     if (!text || loading) return
+
+    const matId = matIdOverride !== undefined ? matIdOverride : activeMaterialId
 
     const userMessage: ChatMessage = {
       id: Date.now().toString(),
@@ -135,9 +148,21 @@ function AssistantContent() {
         body: JSON.stringify({
           message: text,
           chatHistory: historyPayload,
-          materialId: activeMaterialId,
+          materialId: matId,
         }),
       })
+
+      if (res.status === 401) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: (Date.now() + 1).toString(),
+            role: 'assistant',
+            content: '⚠️ You are not signed in. Please sign in to consult your grounded study assistant.',
+          },
+        ])
+        return
+      }
 
       const data = await res.json()
       if (res.ok) {
